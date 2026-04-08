@@ -1,0 +1,24 @@
+#+title: splunk
+
+Search Splunk logs, list indexes, and explore metadata. Borrows session credentials from Brave browser cookies on macOS.
+
+macOS only.
+
+* Tools
+
+| Tool                   | Description                                        |
+|------------------------+----------------------------------------------------|
+| splunk-search          | Run an SPL query with time range and result limits |
+| splunk-indexes         | List available indexes with event counts and sizes |
+| splunk-search-metadata | Discover hosts, sources, sourcetypes for an index  |
+
+* Prerequisites
+
+- macOS (uses Keychain for cookie decryption)
+- Brave browser with an active Splunk session
+
+* Environment
+
+| Variable    | Description                                           |
+|-------------+-------------------------------------------------------|
+| SPLUNK_HOST | Splunk instance hostname (e.g. myorg.splunkcloud.com) |

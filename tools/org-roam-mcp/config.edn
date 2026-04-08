@@ -1,0 +1,26 @@
+{;; Ollama embedding endpoint (via SSH tunnel to arch-machina)
+ :ollama-url  "http://localhost:11434"
+ :model       "nomic-embed-text"
+
+ ;; Notes directory (source of truth, synced via Syncthing)
+ :org-dir     "~/Sync/org"
+
+ ;; Relative path prefixes to skip
+ :exclude     ["data/" ".sync/" ".git/" ".stversions/"]
+
+ ;; Persisted index location
+ :index-dir   "~/.emacs.d/.local/cache/org-roam-mcp"
+
+ ;; HNSW index parameters
+ :hnsw
+ {:dimensions      768
+  :max-items       100000
+  :m               16
+  :ef              200
+  :ef-construction 200}
+
+ ;; File watcher debounce (ms)
+ :watch-debounce-ms 2000
+
+ ;; Embedding batch size for initial indexing
+ :embed-batch-size 32}

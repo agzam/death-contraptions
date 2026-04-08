@@ -1,0 +1,20 @@
+;; Copy this file to local-config.edn (or local-config.edn.gpg for encryption)
+;; and fill in your values.
+;;
+;; Servers listed here get their env vars injected into the generated config.
+;; Servers not listed use defaults (no env vars).
+;; Set :enabled false to exclude a server entirely.
+
+{;; ECA/Claude Code settings (merged into config.json top-level)
+ :eca
+ {:defaultModel "anthropic/claude-sonnet-4-20250514"
+  :agent {:code {:variant "max"}
+          :plan {:variant "max"}}}
+
+ :servers
+ {:slack {:env {"SLACK_DEFAULT_HOST" "your-workspace.slack.com"}}
+  :splunk {:env {"SPLUNK_HOST" "your-instance.splunkcloud.com"}}}
+
+ ;; Extra content appended to AGENTS.md (optional)
+ ;; :agents-extra "..."
+}

@@ -1,0 +1,31 @@
+#+title: General AI harness + a bunch of AI Tools
+
+MCP servers and skills for AI coding assistants.
+
+Works with Claude Code CLI (ECA), Claude Desktop, and gptel/gptel-agent in Emacs.
+
+* Prerequisites
+
+- [[https://github.com/babashka/babashka][Babashka]] - all .bb servers require it
+- [[https://clojure.org/guides/install][Clojure]] - for org-roam-mcp
+- Platform tools as needed: kubectl/helm (k8s), osascript (jxa-browser)
+
+* Setup
+
+1. Clone this repo
+2. Copy =local-config.example.edn= to =local-config.edn= (or =local-config.edn.gpg= for encrypted)
+3. Fill in your personal values (Slack workspace, Splunk host, etc.)
+4. Run the setup script:
+
+#+begin_src sh
+bb setup.bb
+#+end_src
+
+This generates config files and symlinks for all supported consumers:
+- =~/.config/eca/config.json= (Claude Code CLI / ECA)
+- =~/Library/Application Support/Claude/claude_desktop_config.json= (Claude Desktop, macOS)
+- Symlinks =~/.config/eca/tools= and =~/.config/eca/skills= to this repo
+
+* Emacs integration
+
+For gptel/gptel-agent users - the generated =config.json= can be parsed to register MCP tools with lazy server startup. See the gptel-mcp package in your Emacs config.

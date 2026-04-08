@@ -1,0 +1,24 @@
+#+title: slack
+
+Search Slack messages and fetch conversation threads. Extracts credentials from the Slack desktop app on macOS (Keychain + local storage).
+
+macOS only.
+
+* Tools
+
+| Tool               | Description                                                            |
+|--------------------+------------------------------------------------------------------------|
+| slack-search       | Search messages with Slack operators (from:, in:, before:, has:, etc.) |
+| slack-fetch-thread | Fetch full thread from a Slack message URL, resolves user mentions     |
+
+* Prerequisites
+
+- macOS (uses Keychain for credential extraction)
+- Slack desktop app installed and signed in
+- rg (ripgrep)
+
+* Environment
+
+| Variable           | Description                               |
+|--------------------+-------------------------------------------|
+| SLACK_DEFAULT_HOST | Default workspace (e.g. myteam.slack.com) |

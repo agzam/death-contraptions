@@ -1,0 +1,14 @@
+#+title: elisp-eval
+
+Evaluate Emacs Lisp in a running Emacs server and capture screenshots.
+
+* Tools
+
+| Tool             | Description                                                                      |
+|------------------+----------------------------------------------------------------------------------|
+| elisp-eval       | Evaluate Elisp code via emacsclient. Returns result, *Messages*, and *trace-output*. |
+| emacs-screenshot | Capture Emacs frame as PNG (macOS via screencapture).                            |
+
+* Prerequisites
+
+- Emacs running as server (emacsclient must be reachable)

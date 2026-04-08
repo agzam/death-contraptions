@@ -1,0 +1,29 @@
+#+title: jxa-browser
+
+Browser automation via macOS JavaScript for Automation. Auto-detects the default browser.
+
+macOS only.
+
+* Tools
+
+| Tool                    | Description                                               |
+|-------------------------+-----------------------------------------------------------|
+| browser-list-tabs       | List all open tabs across windows                         |
+| browser-read-active-tab | Read page content, optionally search by query             |
+| browser-get-selection   | Get selected text in active tab                           |
+| browser-navigate        | Go to URL, back, forward, reload                          |
+| browser-click           | Click element by CSS selector or visible text             |
+| browser-type            | Type into input/textarea/contenteditable                  |
+| browser-query           | Query DOM elements - tag, text, attributes, bounding rect |
+| browser-execute-js      | Run JavaScript in the active tab                          |
+| browser-tab             | Switch, open, or close tabs                               |
+| browser-screenshot      | Screenshot browser window as PNG                          |
+| browser-network         | Monitor fetch/XHR requests                                |
+| browser-console-logs    | Capture console output                                    |
+| browser-wait            | Wait for element, text, or URL condition                  |
+| browser-scroll          | Scroll to element, position, or by pixels                 |
+
+* Prerequisites
+
+- macOS (uses osascript, JXA)
+- "Allow JavaScript from Apple Events" enabled in browser Developer menu

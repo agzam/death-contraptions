@@ -1,0 +1,10 @@
+Picked up JAVA_TOOL_OPTIONS: -Dapple.awt.UIElement=true
+WARNING: Using incubator modules: jdk.incubator.vector
+[2026-04-08T19:35:25.158942Z] org-roam-mcp starting, config: /Users/ryl/.config/eca/tools/org-roam-mcp/config.edn
+[2026-04-08T19:35:25.159211Z] Initializing index...
+[2026-04-08T19:35:25.159855Z] Loading index from /Users/ryl/.emacs.d/.local/cache/org-roam-mcp/index.hnsw
+Execution error (StreamCorruptedException) at java.io.ObjectInputStream$BlockDataInputStream/readBlockHeader (ObjectInputStream.java:2992).
+invalid type code: 00
+
+Full report at:
+/var/folders/_z/2234s3td0cn57dhqkx0r_qn80000gp/T/clojure-16774710113321638072.edn

@@ -1,0 +1,30 @@
+#+title: k8s
+
+Kubernetes cluster management. Lists, gets, applies, deletes resources, fetches logs, describes objects, manages Helm releases, and provides stateful watch with diffing.
+
+* Tools
+
+| Tool                 | Description                                       |
+|----------------------+---------------------------------------------------|
+| k8s-contexts         | List available kubeconfig contexts                |
+| k8s-resources-list   | List resources by kind (summary or full JSON)     |
+| k8s-resources-get    | Get a specific resource by name                   |
+| k8s-resources-apply  | Create/update from YAML/JSON manifest             |
+| k8s-resources-delete | Delete a resource                                 |
+| k8s-pod-logs         | Pod logs, uses stern for multi-pod regex matching |
+| k8s-pod-exec         | Execute command in a running pod                  |
+| k8s-events           | List events, filterable by kind/name              |
+| k8s-describe         | Human-readable describe with events               |
+| k8s-api-resources    | List API resource types including CRDs            |
+| k8s-helm-list        | List Helm releases                                |
+| k8s-helm-status      | Helm release status details                       |
+| k8s-resources-watch  | Stateful watch - snapshots then diffs             |
+
+Secrets are always redacted in output.
+
+* Prerequisites
+
+- kubectl (required)
+- stern (optional, multi-pod log matching)
+- helm (optional)
+- kubectl-neat (optional, cleaner spec output)
