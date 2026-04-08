@@ -34,7 +34,9 @@
 
 ;;; ---------- Cookie decryption (Chromium v10 scheme) ----------
 
-(defn get-keychain-password []
+(defn get-keychain-password
+  "Brave stores its cookie encryption key in the macOS Keychain under 'Brave Safe Storage'."
+  []
   (or (sh "security" "find-generic-password" "-s" "Brave Safe Storage" "-w")
       (throw (ex-info "Could not retrieve Brave keychain password" {}))))
 
@@ -100,6 +102,8 @@
 ;;; ---------- Credential management ----------
 
 (defn ensure-credentials!
+  "Lazily decrypt and cache Brave cookies on first use; force? bypasses the cache
+  for session refresh after expiry."
   ([] (ensure-credentials! false))
   ([force?]
    (when (or force? (nil? @credentials))
@@ -116,20 +120,31 @@
 
 ;;; ---------- Splunk API layer ----------
 
-(defn- cookie-header [{:keys [session csrf port]}]
+(defn- cookie-header
+  "Build the Cookie header string - Splunk web proxy authenticates via browser session cookies."
+  [{:keys [session csrf port]}]
   (str "splunkd_" port "=" session
        "; splunkweb_csrf_token_" port "=" csrf))
 
-(defn- base-url [path]
+(defn- base-url
+  "Route through the Splunk web proxy (/en-US/splunkd/__raw) so cookie auth works
+  instead of requiring a separate API token."
+  [path]
   (str "https://" splunk-host "/en-US/splunkd/__raw" path))
 
-(defn- session-expired? [status body]
+(defn- session-expired?
+  "Detect expired sessions via HTTP status or body keywords - Splunk returns
+  inconsistent signals depending on the endpoint."
+  [status body]
   (or (= 401 status)
       (= 403 status)
       (and (string? body)
            (re-find #"(?i)unauthorized|session|login" body))))
 
-(defn- should-retry? [status body]
+(defn- should-retry?
+  "Allow one retry per refresh interval to avoid hammering keychain decryption
+  on persistent auth failures."
+  [status body]
   (and (session-expired? status body)
        (< refresh-interval-ms
           (- (System/currentTimeMillis) @last-refresh))))
@@ -251,7 +266,10 @@
          (keep #(try (json/parse-string % true)
                      (catch Exception _ nil))))))
 
-(defn format-search-results [results max-n]
+(defn format-search-results
+  "Render results as plain text with _time and _raw prioritized - these are the most
+  useful fields for quick triage, remaining fields sorted alphabetically."
+  [results max-n]
   (let [data       (keep :result results)
         total      (count data)
         truncated? (< max-n total)
@@ -313,7 +331,10 @@
                              fields))))
                shown)))))))
 
-(defn do-search [{:strs [query earliest_time latest_time max_results]}]
+(defn do-search
+  "Entry point for splunk-search tool. Uses the async job API so the server can
+  poll for completion and respect max_results via server-side truncation."
+  [{:strs [query earliest_time latest_time max_results]}]
   (try
     (ensure-credentials!)
     (let [max-n   (min (or (some-> max_results parse-long) 100) 10000)
@@ -339,7 +360,10 @@
 
 ;;; ---------- Tool: splunk-indexes ----------
 
-(defn do-indexes [{:strs [include_internal]}]
+(defn do-indexes
+  "List all Splunk indexes with event counts and sizes - lets callers discover
+  available data before crafting searches."
+  [{:strs [include_internal]}]
   (try
     (ensure-credentials!)
     (let [{:keys [status body]} (splunk-get "/services/data/indexes"
@@ -375,7 +399,10 @@
 
 ;;; ---------- Tool: splunk-search-metadata ----------
 
-(defn do-metadata [{:strs [index metadata_type]}]
+(defn do-metadata
+  "Discover hosts, sources, and sourcetypes within an index - provides the vocabulary
+  needed to build meaningful SPL queries against unfamiliar data."
+  [{:strs [index metadata_type]}]
   (try
     (ensure-credentials!)
     (let [types   (if metadata_type
@@ -457,7 +484,10 @@
                                   :description "Specific type: 'hosts', 'sources', or 'sourcetypes'. Omit for all three."}}
      :required   ["index"]}}])
 
-(defn handle-request [{:strs [id method params]}]
+(defn handle-request
+  "Dispatch MCP JSON-RPC requests - routes initialize, tools/list, and tools/call
+  to their handlers, returning nil for notifications and unknown methods."
+  [{:strs [id method params]}]
   (case method
     "initialize"
     {:jsonrpc "2.0" :id id

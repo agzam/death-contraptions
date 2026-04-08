@@ -158,7 +158,9 @@
 
 ;;; ---------- Credential management ----------
 
-(defn- normalize-host [s]
+(defn- normalize-host
+  "Ensure host is a full Slack domain - callers may pass just 'foo' or 'foo.slack.com'."
+  [s]
   (cond-> s
     (not (str/includes? s ".slack.com"))
     (str ".slack.com")))
@@ -340,7 +342,9 @@
 
 ;;; ---------- Tool: slack-search ----------
 
-(defn format-search-results [resp host query]
+(defn format-search-results
+  "Build a human-readable summary with permalinks so each result is traceable back to Slack."
+  [resp host query]
   (if-not (get resp "ok")
     (str "Slack API error: " (get resp "error"))
     (let [messages (get resp "messages")
@@ -382,7 +386,9 @@
                           "\n🔗 " permalink)))
                  matches))))))
 
-(defn do-search [{:strs [query workspace count page]}]
+(defn do-search
+  "MCP tool handler - resolves workspace, calls search.messages API, formats response."
+  [{:strs [query workspace count page]}]
   (try
     (let [host   (resolve-host workspace)
           params {"query" query
@@ -419,7 +425,9 @@
          (when link
            (str "\n" indent "🔗 " link)))))
 
-(defn format-thread [messages host channel-id]
+(defn format-thread
+  "Format a full thread with indented replies - visually distinguishes parent from children."
+  [messages host channel-id]
   (let [channel-name (resolve-channel host channel-id)]
     (str "Thread in #" channel-name " (" host ")\n\n"
          (str/join
@@ -429,7 +437,10 @@
              (format-message host channel-id msg (if (zero? i) "" "    ")))
            messages)))))
 
-(defn do-fetch-thread [{:strs [url]}]
+(defn do-fetch-thread
+  "MCP tool handler - parses a Slack permalink URL to extract channel/ts, fetches the thread
+  via conversations.replies, falls back to conversations.history for single messages."
+  [{:strs [url]}]
   (try
     (let [parsed    (or (parse-slack-url url)
                        (throw (ex-info (str "Could not parse Slack URL: " url) {})))
@@ -491,7 +502,9 @@
                         :description "Slack message URL (e.g. https://myteam.slack.com/archives/C123ABC/p1234567890123456)"}}
      :required   ["url"]}}])
 
-(defn handle-request [{:strs [id method params]}]
+(defn handle-request
+  "Dispatch a JSON-RPC request by method name - the core MCP protocol router."
+  [{:strs [id method params]}]
   (case method
     "initialize"
     {:jsonrpc "2.0" :id id

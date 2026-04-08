@@ -14,7 +14,10 @@
 (def ^:private default-timeout-sec 30)
 (def ^:private max-output-chars 50000)
 
-(defn- truncate [s]
+(defn- truncate
+  "Emacsclient output can be enormous (e.g., full buffer dumps); cap it to
+  avoid blowing up MCP message size limits."
+  [s]
   (if (< max-output-chars (count s))
     (str (subs s 0 max-output-chars)
          (format "\n\n[output truncated at %d chars, %d total]"
@@ -72,7 +75,11 @@ MCP server management:
     :properties {}
     :required []}})
 
-(defn eval-elisp [{:strs [code timeout print_length print_level]}]
+(defn eval-elisp
+  "Core elisp evaluation via emacsclient. Writes code to a temp file to avoid
+  shell-escaping issues, wraps it to capture Messages/trace/backtrace, and
+  enforces a timeout to kill runaway or interactive evals."
+  [{:strs [code timeout print_length print_level]}]
   (let [timeout-sec (or timeout default-timeout-sec)
         pl  (if print_length (if (= print_length -1) "nil" (str print_length)) "200")
         plv (if print_level  (if (= print_level -1)  "nil" (str print_level))  "10")
@@ -180,7 +187,10 @@ MCP server management:
         b64   (.encodeToString (java.util.Base64/getEncoder) bytes)]
     {:content [{:type "image" :data b64 :mimeType "image/png"}]}))
 
-(defn- screenshot-error [msg]
+(defn- screenshot-error
+  "Standardized MCP error response for screenshot failures - avoids repeating
+  the error-wrapping boilerplate in every platform-specific screenshot fn."
+  [msg]
   {:content [{:type "text" :text msg}] :isError true})
 
 (defn- screenshot-macos
@@ -253,7 +263,10 @@ MCP server management:
               (screenshot-error "gnome-screenshot and grim both failed.")))))
       (finally (.delete tmp)))))
 
-(defn take-screenshot []
+(defn take-screenshot
+  "Dispatch to the correct platform screenshot method based on Emacs window
+  system (ns/x/pgtk), since each requires different capture tooling."
+  []
   (let [ws (emacsclient-eval "(framep (selected-frame))")]
     (case ws
       "ns"   (screenshot-macos)
@@ -261,7 +274,10 @@ MCP server management:
       "pgtk" (screenshot-pgtk)
       (screenshot-error
        (str "Unsupported window system: " ws ". Requires GUI Emacs.")))))
-(defn handle-request [{:strs [id method params]}]
+(defn handle-request
+  "MCP JSON-RPC dispatch - routes initialize, tools/list, and tools/call to
+  their handlers; returns nil for notifications and unknown methods."
+  [{:strs [id method params]}]
   (case method
     "initialize"
     {:jsonrpc "2.0" :id id

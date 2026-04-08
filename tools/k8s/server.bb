@@ -23,7 +23,9 @@
       (let [s (str/trim out)]
         (when-not (str/blank? s) s)))))
 
-(defn which [cmd] (sh-ok "which" cmd))
+(defn which
+  "Resolve binary path at startup so we can skip tools that aren't installed."
+  [cmd] (sh-ok "which" cmd))
 
 (def kubectl-bin (or (which "kubectl") "kubectl"))
 (def stern-bin (which "stern"))
@@ -32,10 +34,13 @@
 
 ;;; ---------- kubectl plumbing ----------
 
-(defn truthy? [v] (or (true? v) (= "true" v)))
+(defn truthy?
+  "MCP params arrive as strings, so boolean flags need both true and \"true\"."
+  [v] (or (true? v) (= "true" v)))
 
 (defn kubectl-args
-  "Build common kubectl flags from tool params."
+  "Every kubectl call needs the same context/ns/kubeconfig flags - centralize
+  so individual handlers stay focused on their subcommand logic."
   [{:strs [kubeconfig context namespace all_namespaces]}]
   (cond-> []
     kubeconfig               (into ["--kubeconfig" kubeconfig])
@@ -70,7 +75,10 @@
 
 ;;; ---------- Summary extraction ----------
 
-(defn pod-summary [pod]
+(defn pod-summary
+  "Pods have rich status (CrashLoop, readiness, restarts) that the raw JSON
+  buries across multiple nested fields - extract into a flat, scannable map."
+  [pod]
   (let [meta   (get pod "metadata")
         status (get pod "status")
         cstatuses (get status "containerStatuses" [])
@@ -91,7 +99,10 @@
      :node      (get-in pod ["spec" "nodeName"])
      :age       (get-in meta ["creationTimestamp"])}))
 
-(defn deployment-summary [dep]
+(defn deployment-summary
+  "Surface the key operational fields (ready/available replica counts) that
+  callers care about without wading through the full deployment spec."
+  [dep]
   (let [meta   (get dep "metadata")
         status (get dep "status")
         spec   (get dep "spec")]
@@ -102,7 +113,10 @@
      :available  (get status "availableReplicas" 0)
      :age        (get-in meta ["creationTimestamp"])}))
 
-(defn service-summary [svc]
+(defn service-summary
+  "Services need type, cluster-ip, and ports at a glance - the fields most
+  useful for connectivity debugging."
+  [svc]
   (let [meta (get svc "metadata")
         spec (get svc "spec")]
     {:name       (get meta "name")
@@ -112,34 +126,49 @@
      :ports      (mapv (fn [p] (str (get p "port") "/" (get p "protocol")))
                        (get spec "ports" []))}))
 
-(defn generic-summary [resource]
+(defn generic-summary
+  "Fallback for resource kinds without a dedicated summary - returns enough
+  metadata to identify and age-sort any resource."
+  [resource]
   (let [meta (get resource "metadata")]
     {:name      (get meta "name")
      :namespace (get meta "namespace")
      :kind      (get resource "kind")
      :age       (get-in meta ["creationTimestamp"])}))
 
-(defn summarize-resource [resource]
+(defn summarize-resource
+  "Dispatch to kind-specific summary, so each resource type gets the most
+  operationally relevant fields extracted."
+  [resource]
   (case (get resource "kind")
     "Pod"        (pod-summary resource)
     "Deployment" (deployment-summary resource)
     "Service"    (service-summary resource)
     (generic-summary resource)))
 
-(defn summarize-list [data]
+(defn summarize-list
+  "Full JSON for large lists easily exceeds MCP output limits and overwhelms
+  LLM context - summaries keep responses compact and actionable."
+  [data]
   (let [items (get data "items" [])]
     (mapv summarize-resource items)))
 
 ;;; ---------- Secrets masking ----------
 
-(defn mask-secret-data [resource]
+(defn mask-secret-data
+  "Secret values must never leak into MCP responses - redact data/stringData
+  while preserving the key names for structural awareness."
+  [resource]
   (if (= "Secret" (get resource "kind"))
     (-> resource
         (update "data"       #(when % (zipmap (keys %) (repeat "***REDACTED***"))))
         (update "stringData" #(when % (zipmap (keys %) (repeat "***REDACTED***")))))
     resource))
 
-(defn mask-secrets-in-list [data]
+(defn mask-secrets-in-list
+  "List responses may contain mixed resource kinds - ensure every Secret item
+  in the list gets redacted, not just top-level gets."
+  [data]
   (if (= "List" (get data "kind"))
     (update data "items" #(mapv mask-secret-data %))
     (mask-secret-data data)))
@@ -148,22 +177,37 @@
 
 (def max-output-chars 50000)
 
-(defn truncate [text]
+(defn truncate
+  "MCP clients and LLMs have finite context windows - cap output so a single
+  verbose response doesn't blow the budget."
+  [text]
   (if (< (count text) max-output-chars) text
       (str (subs text 0 max-output-chars) "\n\n... (truncated at " max-output-chars " chars)")))
 
-(defn text-result [text]
+(defn text-result
+  "Wrap plain text in the MCP content envelope so every handler returns
+  a consistent shape without repeating the boilerplate."
+  [text]
   {:content [{:type "text" :text (truncate text)}]})
 
-(defn error-result [text]
+(defn error-result
+  "Same envelope as text-result but with isError flag, so MCP clients can
+  distinguish tool failures from successful empty results."
+  [text]
   {:content [{:type "text" :text text}] :isError true})
 
-(defn json-result [data]
+(defn json-result
+  "Convenience for returning structured data - pretty-prints and wraps in
+  the text envelope since MCP has no native JSON content type."
+  [data]
   (text-result (json/generate-string data {:pretty true})))
 
 ;;; ---------- Tool handlers ----------
 
-(defn do-contexts [{:strs [kubeconfig]}]
+(defn do-contexts
+  "List all kubeconfig contexts so the caller can discover available clusters
+  before targeting one."
+  [{:strs [kubeconfig]}]
   (let [args (cond-> ["config" "get-contexts"]
                kubeconfig (into ["--kubeconfig" kubeconfig]))
         {:keys [exit out err]} (apply shell/sh kubectl-bin args)]
@@ -171,7 +215,10 @@
       (text-result (str/trim out))
       (error-result (str "Error: " (str/trim err))))))
 
-(defn do-resources-list [{:strs [kind label_selector field_selector output] :as opts}]
+(defn do-resources-list
+  "Returns compact summaries by default to stay within output limits; only
+  fetches full JSON (with neat cleaning) when explicitly requested."
+  [{:strs [kind label_selector field_selector output] :as opts}]
   (let [full?  (= "full" output)
         args   (cond-> ["get" kind]
                  label_selector (into ["-l" label_selector])
@@ -184,21 +231,31 @@
           (json-result masked)
           (json-result (summarize-list masked)))))))
 
-(defn do-resources-get [{:strs [kind name] :as opts}]
+(defn do-resources-get
+  "Single-resource get always uses kubectl-neat (if available) to strip managed
+  fields and status noise, then masks secrets before returning."
+  [{:strs [kind name] :as opts}]
   (let [{:keys [ok data err]} (run-kubectl-json ["get" kind name] :opts opts :neat? true)]
     (if ok
       (json-result (mask-secret-data data))
       (error-result (str "kubectl error: " err)))))
 
-(defn do-resources-apply [{:strs [resource] :as opts}]
+(defn do-resources-apply
+  "Pipe a manifest to kubectl apply via stdin to avoid temp files."
+  [{:strs [resource] :as opts}]
   (let [{:keys [ok out err]} (run-kubectl ["apply" "-f" "-"] :opts opts :stdin resource)]
     (if ok (text-result out) (error-result (str "kubectl apply error: " err)))))
 
-(defn do-resources-delete [{:strs [kind name] :as opts}]
+(defn do-resources-delete
+  "Delete a single resource by kind and name."
+  [{:strs [kind name] :as opts}]
   (let [{:keys [ok out err]} (run-kubectl ["delete" kind name] :opts opts)]
     (if ok (text-result out) (error-result (str "kubectl delete error: " err)))))
 
-(defn do-pod-logs [{:strs [query tail since container include exclude] :as opts}]
+(defn do-pod-logs
+  "Prefer stern for multi-pod regex matching and structured output; fall back
+  to kubectl logs when stern is not installed (single pod only)."
+  [{:strs [query tail since container include exclude] :as opts}]
   (let [{:strs [kubeconfig context namespace]} opts]
     (if stern-bin
       ;; stern: multi-pod regex matching, structured output
@@ -231,14 +288,18 @@
           (text-result (if (str/blank? out) "No logs found." out))
           (error-result (str "kubectl logs error: " err)))))))
 
-(defn do-pod-exec [{:strs [name command container] :as opts}]
+(defn do-pod-exec
+  "Run a command inside a pod container via kubectl exec."
+  [{:strs [name command container] :as opts}]
   (let [args (cond-> ["exec" name]
                container (into ["-c" container])
                true      (into ["--" "sh" "-c" command]))
         {:keys [ok out err]} (run-kubectl args :opts opts)]
     (if ok (text-result out) (error-result (str "kubectl exec error: " err)))))
 
-(defn do-events [{:strs [kind name] :as opts}]
+(defn do-events
+  "Fetch cluster events sorted by time, optionally filtered to a specific resource."
+  [{:strs [kind name] :as opts}]
   (let [args (cond-> ["get" "events" "--sort-by=.lastTimestamp"]
                (and kind name)
                (into ["--field-selector"
@@ -249,15 +310,24 @@
       (text-result (if (str/blank? out) "No events found." out))
       (error-result (str "kubectl error: " err)))))
 
-(defn do-describe [{:strs [kind name] :as opts}]
+(defn do-describe
+  "Human-readable describe output including events - useful when structured
+  JSON misses annotations or event context."
+  [{:strs [kind name] :as opts}]
   (let [{:keys [ok out err]} (run-kubectl ["describe" kind name] :opts opts)]
     (if ok (text-result out) (error-result (str "kubectl describe error: " err)))))
 
-(defn do-api-resources [opts]
+(defn do-api-resources
+  "Discover available resource types including CRDs before attempting to list
+  or get unfamiliar kinds."
+  [opts]
   (let [{:keys [ok out err]} (run-kubectl ["api-resources" "--sort-by=kind"] :opts opts)]
     (if ok (text-result out) (error-result (str "kubectl error: " err)))))
 
-(defn do-helm-list [{:strs [namespace] :as opts}]
+(defn do-helm-list
+  "Defaults to all-namespaces because releases are commonly spread across
+  namespaces and omitting -A is a frequent source of confusion."
+  [{:strs [namespace] :as opts}]
   (if-not helm-bin
     (error-result "helm is not installed")
     (let [{:strs [kubeconfig context all_namespaces]} opts
@@ -272,7 +342,10 @@
         (text-result out)
         (error-result (str "helm error: " (str/trim err)))))))
 
-(defn do-helm-status [{:strs [name] :as opts}]
+(defn do-helm-status
+  "Fetch detailed status for a single Helm release (chart version, app
+  version, deploy status)."
+  [{:strs [name] :as opts}]
   (if-not helm-bin
     (error-result "helm is not installed")
     (let [{:strs [kubeconfig context namespace]} opts
@@ -287,10 +360,16 @@
 
 ;; --- Watch / diff ---
 
-(defn item-key [item]
+(defn item-key
+  "Namespace/name uniquely identifies a resource within a kind - used as the
+  stable key for diffing between watch snapshots."
+  [item]
   (str (get-in item ["metadata" "namespace"]) "/" (get-in item ["metadata" "name"])))
 
-(defn diff-resources [prev-items curr-items]
+(defn diff-resources
+  "Compare two snapshots by keyed identity to produce added/removed/changed
+  sets - avoids the Kubernetes watch API which requires long-lived connections."
+  [prev-items curr-items]
   (let [prev-map (into {} (map (fn [i] [(item-key i) i]) prev-items))
         curr-map (into {} (map (fn [i] [(item-key i) i]) curr-items))
         pks (set (keys prev-map))
@@ -304,10 +383,16 @@
      :changed (mapv (fn [k] {:key k :current (get curr-map k)}) changed)
      :total   (count curr-items)}))
 
-(defn watch-key [{:strs [kind namespace label_selector kubeconfig context]}]
+(defn watch-key
+  "Cache key incorporates all query dimensions so different filters on the
+  same kind get independent snapshot histories."
+  [{:strs [kind namespace label_selector kubeconfig context]}]
   (str kind "|" namespace "|" label_selector "|" kubeconfig "|" context))
 
-(defn do-resources-watch [{:strs [kind label_selector field_selector] :as opts}]
+(defn do-resources-watch
+  "Snapshot-then-diff: first call captures baseline and returns summaries,
+  subsequent calls return only what changed since the last snapshot."
+  [{:strs [kind label_selector field_selector] :as opts}]
   (let [args (cond-> ["get" kind]
                label_selector (into ["-l" label_selector])
                field_selector (into ["--field-selector" field_selector]))
@@ -482,7 +567,10 @@
 
 (def server-info {:name "k8s" :version "0.1.0"})
 
-(defn handle-tool-call [tool-name args]
+(defn handle-tool-call
+  "Central dispatch from MCP tool name to handler fn - keeps the protocol
+  layer decoupled from kubectl logic and provides uniform error wrapping."
+  [tool-name args]
   (try
     (case tool-name
       "k8s-contexts"         (do-contexts args)
@@ -502,7 +590,10 @@
     (catch Exception e
       (error-result (str "Error: " (.getMessage e))))))
 
-(defn handle-request [{:strs [id method params]}]
+(defn handle-request
+  "Route incoming MCP JSON-RPC messages by method - handles the protocol
+  handshake (initialize), tool discovery, and tool invocation."
+  [{:strs [id method params]}]
   (case method
     "initialize"
     {:jsonrpc "2.0" :id id

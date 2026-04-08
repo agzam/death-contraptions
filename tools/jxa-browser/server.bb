@@ -16,7 +16,10 @@
 
 (def browser-name (atom nil))
 
-(defn default-browser []
+(defn default-browser
+  "Resolves the user's default browser from LaunchServices prefs.
+  Cached in atom since the default won't change mid-session."
+  []
   (or @browser-name
       (let [{:keys [exit out]} (shell/sh
                                 "sh" "-c"
@@ -28,10 +31,16 @@
             (reset! browser-name name)
             name)))))
 
-(defn run-jxa [script]
+(defn run-jxa
+  "Executes a JXA (JavaScript for Automation) script via osascript.
+  JXA is macOS's JS-based alternative to AppleScript for app control."
+  [script]
   (shell/sh "osascript" "-l" "JavaScript" "-e" script))
 
-(defn html->text [html]
+(defn html->text
+  "Converts HTML to plain text via macOS textutil.
+  Needed because raw DOM HTML is unusable for text search and display."
+  [html]
   (let [{:keys [exit out err]} (shell/sh "textutil" "-stdin" "-format" "html" "-convert" "txt" "-stdout"
                                          :in html)]
     (if (zero? exit)
@@ -39,7 +48,8 @@
       (str "textutil error: " (str/trim err)))))
 
 (defn wrap-result
-  "Wraps exec-js-in-tab result into MCP content format."
+  "Reshapes {:ok ...}/{:error ...} into MCP's required content envelope.
+  MCP protocol mandates a {:content [{:type :text}]} response shape."
   [{:keys [ok error]}]
   (if error
     {:content [{:type "text" :text (str "Error: " error)}] :isError true}
@@ -222,7 +232,9 @@
 
 ;;; --- Existing Tool Implementations ---
 
-(defn list-tabs []
+(defn list-tabs
+  "Enumerates all tabs across all browser windows via JXA."
+  []
   (let [browser (default-browser)
         script (format "
 var browser = Application('%s');
@@ -299,7 +311,9 @@ JSON.stringify({url: activeTab.url(), title: activeTab.name(), html: html});
          :html  (:html parsed)})
       {:error (str "JXA error: " (str/trim (str out err)))})))
 
-(defn get-selection []
+(defn get-selection
+  "Returns the current text selection in the active browser tab."
+  []
   (let [browser (default-browser)
         script  (format "
 var browser = Application('%s');
@@ -314,7 +328,10 @@ activeTab.execute({javascript: 'window.getSelection().toString()'});
       {:content [{:type "text" :text (str "JXA error: " (str/trim (str out err)))}]
        :isError true})))
 
-(defn read-active-tab [query fmt]
+(defn read-active-tab
+  "Reads active tab content. Dispatches on format (html vs text) and query presence -
+  returning either raw HTML, a preview with metadata, or grep-matched lines."
+  [query fmt]
   (let [{:keys [url title html error]} (fetch-active-tab-content)]
     (if error
       {:content [{:type "text" :text error}] :isError true}
@@ -358,7 +375,9 @@ activeTab.execute({javascript: 'window.getSelection().toString()'});
           (do (Thread/sleep 500)
               (recur (inc attempt))))))))
 
-(defn browser-navigate [{:strs [url action]}]
+(defn browser-navigate
+  "Navigates the active tab via goto/back/forward/reload, then waits for page load."
+  [{:strs [url action]}]
   (let [action (or action (when url "goto") "reload")]
     (case action
       "goto"
@@ -393,7 +412,10 @@ wins[0].activeTab.url = %s;
           (Thread/sleep 1000)
           (wait-for-load 18)))))
 
-(defn browser-click [{:strs [selector text index]}]
+(defn browser-click
+  "Clicks an element found by CSS selector or visible text substring.
+  Text matching tries clickable elements first, then falls back to all DOM nodes."
+  [{:strs [selector text index]}]
   (let [idx (or index 0)
         js-code (format "
 (function() {
@@ -448,7 +470,10 @@ wins[0].activeTab.url = %s;
                         idx)]
     (wrap-result (exec-js-in-tab js-code))))
 
-(defn browser-type [{:strs [text selector clear submit]}]
+(defn browser-type
+  "Types text into an element, dispatching input/change events explicitly.
+  Synthetic value assignment alone won't trigger React/Vue/etc. state updates."
+  [{:strs [text selector clear submit]}]
   (let [js-code (format "
 (function() {
   var el = %s ? document.querySelector(%s) : document.activeElement;
@@ -489,7 +514,10 @@ wins[0].activeTab.url = %s;
                         (boolean submit))]
     (wrap-result (exec-js-in-tab js-code))))
 
-(defn browser-query [{:strs [selector limit]}]
+(defn browser-query
+  "Returns structured DOM info (tag, attrs, rect, visibility) for matched elements.
+  Richer than raw HTML - callers need actionable data to decide what to interact with."
+  [{:strs [selector limit]}]
   (let [lim (or limit 20)
         js-code (format "
 (function() {
@@ -526,7 +554,10 @@ wins[0].activeTab.url = %s;
 " (json/generate-string selector) lim)]
     (wrap-result (exec-js-in-tab js-code))))
 
-(defn browser-execute-js [{:strs [code iframe_selector]}]
+(defn browser-execute-js
+  "Evaluates arbitrary JS in the active tab. Supports targeting same-origin iframes
+  since many apps embed content in frames that the top-level context can't reach."
+  [{:strs [code iframe_selector]}]
   (let [code-b64 (.encodeToString (java.util.Base64/getEncoder) (.getBytes code "UTF-8"))
         js-code (if iframe_selector
                   (str "(function() { try {"
@@ -546,7 +577,9 @@ wins[0].activeTab.url = %s;
                        " } catch(e) { return JSON.stringify({error: e.message, stack: e.stack}); }})()"))]
     (wrap-result (exec-js-in-tab js-code))))
 
-(defn browser-tab [{:strs [action tabIndex windowIndex url url_pattern]}]
+(defn browser-tab
+  "Manages browser tabs - switch (by index or URL regex), open, or close."
+  [{:strs [action tabIndex windowIndex url url_pattern]}]
   (let [browser (default-browser)
         win-idx (or windowIndex 1)]
     (case action
@@ -613,7 +646,10 @@ JSON.stringify({closed: info, remainingTabs: win.tabs.length});
           {:content [{:type "text" :text (str/trim out)}]}
           {:content [{:type "text" :text (str "JXA error: " (str/trim (str out err)))}] :isError true})))))
 
-(defn browser-screenshot []
+(defn browser-screenshot
+  "Captures browser window screenshot using macOS screencapture.
+  JXA has no screenshot API, so we find the CGWindowID via Swift and shell out."
+  []
   (let [browser (default-browser)
         tmp-file "/tmp/mcp_browser_screenshot.png"
         ;; Get window bounds from JXA, then find CGWindowID via Swift
@@ -651,7 +687,10 @@ JSON.stringify(b);
                   :text "screencapture failed. Grant Screen Recording permission to Emacs (or terminal) in System Settings > Privacy & Security > Screen Recording."}]
        :isError true})))
 
-(defn browser-network [{:strs [action filter]}]
+(defn browser-network
+  "Monitors network requests by monkey-patching fetch/XHR in the page context.
+  No browser devtools API is available from JXA, so interception is the only option."
+  [{:strs [action filter]}]
   (case action
     "start"
     (wrap-result
@@ -750,7 +789,10 @@ JSON.stringify(b);
   return JSON.stringify({stopped: true, entriesCaptured: count});
 })()"))))
 
-(defn browser-console-logs [{:strs [action level]}]
+(defn browser-console-logs
+  "Captures console output by monkey-patching console.log/warn/error/etc.
+  JXA can't access browser devtools, so we intercept at the JS API level."
+  [{:strs [action level]}]
   (case action
     "start"
     (wrap-result
@@ -805,7 +847,10 @@ JSON.stringify(b);
   return JSON.stringify({stopped: true, entriesCaptured: count});
 })()"))))
 
-(defn browser-wait [{:strs [selector text url_pattern state timeout]}]
+(defn browser-wait
+  "Polls the page every 500ms for a condition (element, text, or URL match).
+  Polling is necessary because JXA has no event subscription mechanism."
+  [{:strs [selector text url_pattern state timeout]}]
   (let [wait-state (or state "visible")
         timeout-ms (or timeout 10000)
         max-attempts (quot timeout-ms 500)]
@@ -863,7 +908,9 @@ JSON.stringify(b);
                 (do (Thread/sleep 500)
                     (recur (inc attempt)))))))))))
 
-(defn browser-scroll [{:strs [selector direction pixels to]}]
+(defn browser-scroll
+  "Scrolls the page to an element, to top/bottom, or by pixel offset."
+  [{:strs [selector direction pixels to]}]
   (let [px (or pixels 500)
         js-code (cond
                   (and selector (or (= to "element") (nil? to)))
@@ -897,7 +944,10 @@ JSON.stringify(b);
 
 ;;; --- MCP Dispatch ---
 
-(defn handle-request [{:strs [id method params]}]
+(defn handle-request
+  "Dispatches MCP JSON-RPC requests to the appropriate handler by method name.
+  Returns the JSON-RPC response envelope or nil for notifications."
+  [{:strs [id method params]}]
   (case method
     "initialize"
     {:jsonrpc "2.0" :id id

@@ -94,7 +94,10 @@
       (str base "\n" extra)
       base)))
 
-(defn ensure-dir [path]
+(defn ensure-dir
+  "Wrapper for mkdirs - needed because setup must create nested config dirs
+  that may not exist yet (mkdir -p semantics)."
+  [path]
   (.mkdirs (io/file path)))
 
 (defn create-symlink
@@ -106,7 +109,11 @@
       (java.nio.file.Files/delete link-path))
     (java.nio.file.Files/createSymbolicLink link-path target-path (into-array java.nio.file.attribute.FileAttribute []))))
 
-(defn -main []
+(defn -main
+  "Run the full setup: load local config, build and write ECA config.json and
+  AGENTS.md, optionally write Claude Desktop config, and create symlinks for
+  tools/skills into ~/.config/eca/."
+  []
   (println "Setting up death-contraptions...")
   (println (str "  repo: " repo-dir))
   (println (str "  platform: " (if mac? "macOS" "Linux")))
