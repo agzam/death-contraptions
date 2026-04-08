@@ -28,6 +28,3 @@ This generates config files and symlinks for all supported consumers:
 - =~/Library/Application Support/Claude/claude_desktop_config.json= (Claude Desktop, macOS)
 - Symlinks =~/.config/eca/tools= and =~/.config/eca/skills= to this repo
 
-* Emacs integration
-
-For gptel/gptel-agent users - the generated =config.json= can be parsed to register MCP tools with lazy server startup. See the gptel-mcp package in your Emacs config.

@@ -525,8 +525,9 @@
 
 ;;; ---------- Main loop ----------
 
-(doseq [line (line-seq (java.io.BufferedReader. *in*))]
-  (when-not (str/blank? line)
-    (when-let [res (handle-request (json/parse-string line))]
-      (println (json/generate-string res))
-      (flush))))
+(when (= *file* (System/getProperty "babashka.file"))
+  (doseq [line (line-seq (java.io.BufferedReader. *in*))]
+    (when-not (str/blank? line)
+      (when-let [res (handle-request (json/parse-string line))]
+        (println (json/generate-string res))
+        (flush)))))

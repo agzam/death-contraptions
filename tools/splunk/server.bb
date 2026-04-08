@@ -10,9 +10,7 @@
 
 ;;; ---------- Config ----------
 
-(def splunk-host
-  (or (System/getenv "SPLUNK_HOST")
-      (throw (ex-info "SPLUNK_HOST env var required (e.g. myorg.splunkcloud.com)" {}))))
+(def splunk-host (or (System/getenv "SPLUNK_HOST") ""))
 
 (def brave-cookies-db
   (str (System/getProperty "user.home")
@@ -488,8 +486,9 @@
 
 ;;; ---------- Main loop ----------
 
-(doseq [line (line-seq (java.io.BufferedReader. *in*))]
-  (when-not (str/blank? line)
-    (when-let [res (handle-request (json/parse-string line))]
-      (println (json/generate-string res))
-      (flush))))
+(when (= *file* (System/getProperty "babashka.file"))
+  (doseq [line (line-seq (java.io.BufferedReader. *in*))]
+    (when-not (str/blank? line)
+      (when-let [res (handle-request (json/parse-string line))]
+        (println (json/generate-string res))
+        (flush)))))

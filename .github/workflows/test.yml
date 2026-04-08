@@ -4,7 +4,26 @@ on:
   push:
   pull_request:
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
+  bb-tools:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        tool: [elisp-eval, k8s, jxa-browser, slack, splunk]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: DeLaGuardo/setup-clojure@13.1
+        with:
+          bb: latest
+
+      - name: Run tests
+        working-directory: tools/${{ matrix.tool }}
+        run: bb test
+
   org-roam-mcp:
     runs-on: ubuntu-latest
     steps:
