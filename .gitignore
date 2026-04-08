@@ -1,1 +1,16 @@
 local-config.edn
+
+# Clojure
+.cpcache/
+.clj-kondo/.cache/
+.lsp/cache/
+target/
+*.jar
+*.class
+
+# Editors
+.nrepl-port
+.nrepl-history
+
+# Logs
+*.log

@@ -1,14 +1,16 @@
 #+title: General AI harness + a bunch of AI Tools
 
+[[https://github.com/agzam/death-contraptions/actions/workflows/test.yml][https://github.com/agzam/death-contraptions/actions/workflows/test.yml/badge.svg]]
+
 MCP servers and skills for AI coding assistants.
 
-Works with Claude Code CLI (ECA), Claude Desktop, and gptel/gptel-agent in Emacs.
+Aimed to work with various AI fronts - Claude Code CLI, ECA, Claude Desktop, gptel-agent, etc.
 
 * Prerequisites
 
 - [[https://github.com/babashka/babashka][Babashka]] - all .bb servers require it
 - [[https://clojure.org/guides/install][Clojure]] - for org-roam-mcp
-- Platform tools as needed: kubectl/helm (k8s), osascript (jxa-browser)
+- Platform tools as needed per the MCP, e.g., kubectl/helm (k8s), osascript (jxa-browser)
 
 * Setup
 
