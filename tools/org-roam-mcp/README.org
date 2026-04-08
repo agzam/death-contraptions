@@ -1,0 +1,23 @@
+#+title: org-roam-mcp
+
+Semantic search and manipulation of an Org-Roam/Vulpea knowledge base. Maintains an in-memory HNSW vector index, watches for file changes, and calls Ollama for embeddings.
+
+* Tools
+
+| Tool                 | Description                                                           |
+|----------------------+-----------------------------------------------------------------------|
+| notes-search         | Semantic search with optional tag/link filters and compound queries   |
+| notes-search-related | Find notes related to an existing note via stored embedding           |
+| notes-backlinks      | Find all notes linking to a given node                                |
+| notes-read           | Read full content of a note by ID, title, or file path               |
+| notes-annotate       | Identify entities in text matching existing note titles/aliases       |
+| notes-create         | Create notes as file, heading, or journal entry (via emacsclient)    |
+| notes-reindex        | Trigger full or single-file re-indexing                               |
+
+* Prerequisites
+
+- JDK 17+ (HNSW lib uses Vector API for SIMD acceleration)
+- Clojure CLI
+- Ollama with =nomic-embed-text= model (can be remote)
+- Emacs running as server (emacsclient for note creation)
+- Org-roam and Vulpea packages in Emacs
