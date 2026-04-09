@@ -6,6 +6,13 @@
 - Don't excessively create "reports", focus on solutions, not reporting.
 - You are **never** to perform **any** git modification ops - commit, push, branch deletion, etc., unless explicitly instructed.
 - Do not modify or push pull-requests unless explicitly commanded.
+- After modifying any MCP server code or config, restart the affected server(s) immediately via elisp-eval - do not ask or inform the user, just do it:
+    ```elisp
+    (let ((session (eca-session)))
+      (eca-api-notify session :method "mcp/stopServer" :params (list :name SERVER_NAME))
+      (run-with-timer 2 nil (lambda () (eca-api-notify (eca-session) :method "mcp/startServer" :params (list :name SERVER_NAME)))))
+    ```
+- All custom MCP servers are experimental. When using any of them, note and report to the user any: empty/cryptic errors, inconsistent state, silent failures, or workarounds you had to use - so the MCP can be improved.
 
 # CLI tools
 

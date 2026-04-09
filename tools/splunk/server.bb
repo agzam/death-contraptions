@@ -4,13 +4,24 @@
 ;; Author: Ag Ibragimov - github.com/agzam
 
 (require '[cheshire.core :as json]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
          '[clojure.java.shell :as shell]
          '[clojure.string :as str]
          '[babashka.http-client :as http])
 
 ;;; ---------- Config ----------
 
-(def splunk-host (or (System/getenv "SPLUNK_HOST") ""))
+(def ^:private script-dir
+  (-> *file* io/file .getParentFile .getCanonicalPath))
+
+(def ^:private config
+  (let [f (io/file script-dir "config.edn")]
+    (if (.exists f)
+      (edn/read-string (slurp f))
+      {})))
+
+(def splunk-host (or (:host config) ""))
 
 (def brave-cookies-db
   (str (System/getProperty "user.home")

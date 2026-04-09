@@ -1,4 +1,5 @@
 local-config.edn
+tools/*/config.edn
 
 # Clojure
 .cpcache/

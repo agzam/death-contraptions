@@ -16,7 +16,7 @@
 (def eca-dir (str (System/getenv "HOME") "/.config/eca"))
 (def mac? (str/includes? (System/getProperty "os.name") "Mac"))
 
-;; Server registry: name -> {:command, :platform, :env}
+;; Server registry: name -> {:command, :platform}
 (def servers
   {"elisp-eval" {:command "elisp-eval/server.bb"
                  :platform :all}
@@ -57,8 +57,28 @@
   (or (= platform :all)
       (and mac? (= platform :darwin))))
 
+(defn- server-config-path
+  "Resolve a server's config.edn path from its command entry."
+  [server-name]
+  (let [cmd-path (get-in servers [server-name :command])
+        server-dir (-> (io/file tools-dir cmd-path) .getParentFile .getCanonicalPath)]
+    (str server-dir "/config.edn")))
+
+(defn- write-server-config!
+  "Merge :config from local-config into the server's config.edn.
+   Preserves existing defaults, overrides with local values."
+  [server-name config-map]
+  (let [path (server-config-path server-name)
+        existing (if (.exists (io/file path))
+                   (edn/read-string (slurp path))
+                   {})
+        merged (merge existing config-map)]
+    (spit path (pr-str merged))
+    (println (str "  wrote: " path))))
+
 (defn build-server-entries
-  "Build the mcpServers map for config.json."
+  "Build the mcpServers map for config.json.
+   Writes per-server config.edn files from :config in local-config."
   [local-config]
   (let [local-servers (:servers local-config {})]
     (reduce-kv
@@ -69,12 +89,10 @@
                enabled? (get local :enabled true)]
            (if-not enabled?
              acc
-             (let [entry {:command (str tools-dir "/" command)}
-                   env (get local :env)]
-               (assoc acc name
-                      (if env
-                        (assoc entry :env env)
-                        entry)))))))
+             (do
+               (when-let [cfg (:config local)]
+                 (write-server-config! name cfg))
+               (assoc acc name {:command (str tools-dir "/" command)}))))))
      {}
      servers)))
 

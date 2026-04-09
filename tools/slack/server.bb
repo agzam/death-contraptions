@@ -4,9 +4,22 @@
 ;; Author: Ag Ibragimov - github.com/agzam
 
 (require '[cheshire.core :as json]
+         '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
          '[clojure.java.shell :as shell]
          '[clojure.string :as str]
          '[babashka.http-client :as http])
+
+;;; ---------- Config ----------
+
+(def ^:private script-dir
+  (-> *file* io/file .getParentFile .getCanonicalPath))
+
+(def ^:private config
+  (let [f (io/file script-dir "config.edn")]
+    (if (.exists f)
+      (edn/read-string (slurp f))
+      {})))
 
 ;;; ---------- State ----------
 
@@ -18,7 +31,7 @@
 (def refresh-interval-ms 60000) ;; minimum ms between re-extractions
 
 (def slack-data-dir
-  (or (System/getenv "SLACK_DATA_DIR")
+  (or (:data-dir config)
       (str (System/getProperty "user.home")
            "/Library/Application Support/Slack/")))
 
@@ -97,7 +110,7 @@
 (defn get-keychain-password
   "Get the Slack Safe Storage password from macOS Keychain."
   []
-  (let [service (or (System/getenv "SLACK_KEYCHAIN_SERVICE")
+  (let [service (or (:keychain-service config)
                     "Slack Safe Storage")]
     (or (sh "security" "find-generic-password" "-s" service "-w")
         (throw (ex-info "Could not retrieve Slack keychain password" {})))))
@@ -183,8 +196,8 @@
                :when token]
          (swap! credentials assoc host {:token token :cookie cookie})
          (or @default-host (reset! default-host host)))
-       ;; Allow env-var override for the default
-       (let [h (some-> (System/getenv "SLACK_DEFAULT_HOST") normalize-host)]
+       ;; Allow config override for the default
+       (let [h (some-> (:default-host config) normalize-host)]
          (when (and h (contains? @credentials h))
            (reset! default-host h)))
        (reset! last-refresh (System/currentTimeMillis))

@@ -40,7 +40,14 @@ Examples:
 - query='Clojure' - Clojure note + all notes linking to/from it + semantic
 - query='distributed consensus' - pure semantic search
 - query='database work' tags=['DB'] - semantic + tag filter
-- tags=['DB'] links=['Dan Smith'] - structural only"
+- tags=['DB'] links=['Dan Smith'] - structural only
+Troubleshooting: semantic search requires Ollama for embeddings.
+If this tool returns empty errors, the embedding service may be down.
+Try notes-reindex to rebuild the index, or use notes-backlinks for
+structural queries that don't need embeddings.
+Agent note: report any empty/unhelpful error messages, inconsistent
+state (e.g. title resolves but node 'not found'), or silent failures
+back to the user so this MCP can be improved."
     :inputSchema
     {:type "object"
      :properties
@@ -72,7 +79,9 @@ Equivalent to org-roam's backlinks buffer. Accepts node title, alias, or ID."
     :description
     "Read the full content of a note by its org-roam node ID, title, or file path.
 Use after notes-search to get complete content. For heading-level nodes,
-returns only the subtree under that heading."
+returns only the subtree under that heading.
+If you get 'Node not in index' but the node exists (e.g. resolved from
+title), the index may be stale - try notes-reindex first."
     :inputSchema
     {:type "object"
      :properties
@@ -94,7 +103,10 @@ Unlike backlinks, this finds conceptual neighbors even without explicit links."
    {:name "notes-reindex"
     :description
     "Trigger re-indexing. Without arguments, performs a full mtime-based scan.
-With a path, re-indexes only that file."
+With a path, re-indexes only that file.
+Use when: search returns empty errors (Ollama may have been down during
+initial indexing), notes-read says 'not in index' for known nodes, or
+after bulk file changes outside the watcher's view."
     :inputSchema
     {:type "object"
      :properties
@@ -700,6 +712,9 @@ Returns confirmation with the node-id and file path."
     (reset! config cfg)
     (util/log "org-roam-mcp starting, config:" config-path)
 
+    ;; Ensure Ollama connectivity (start SSH tunnel if configured)
+    (util/ensure-ssh-tunnel! cfg)
+
     ;; Initialize index: load from disk immediately, catch-up async
     (util/log "Initializing index...")
     (if-let [[index meta] (idx/load-index (:index-dir cfg))]
@@ -745,6 +760,7 @@ Returns confirmation with the node-id and file path."
       (.addShutdownHook (Runtime/getRuntime)
                         (Thread. (fn []
                                    (util/log "Shutting down")
+                                   (util/stop-ssh-tunnel!)
                                    (when stop-watcher (stop-watcher))
                                    (try
                                      (idx/save-index! @hnsw-index (:index-dir @config) @file-mtimes

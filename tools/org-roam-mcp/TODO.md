@@ -26,6 +26,14 @@
 - [x] Graceful recovery on corrupt HNSW index - load-index catches deserialization errors, deletes corrupt file, falls back to full rebuild
 - [x] 32 tests, 107 assertions
 
+## Bugs
+
+- [ ] Empty error messages everywhere - `.getMessage` returns nil for many Java exceptions (ConnectException, NullPointerException, nested ex-info). Use `(or (ex-message e) (str (class e)))` in all catch blocks: core.clj:321, watcher.clj:26, and anywhere else `.getMessage` is used raw.
+- [ ] notes-read fails for non-embedded nodes - resolves title via secondary index, gets node-id, then demands HNSW item (which doesn't exist for short chunks or embed-failed nodes). notes-read should fall back to secondary metadata + direct file read via emacsclient/org-id-find.
+- [ ] notes-search crashes when Ollama is down instead of degrading - graph-enriched search (title match, backlinks, outgoing) doesn't need embeddings but the code calls embed-query unconditionally before any graph logic. Should catch embed failure, skip semantic portion, return graph+structural results with a `:degraded` flag.
+- [ ] Watcher removes old HNSW items before re-embedding succeeds - process-file-change! deletes existing items (watcher.clj:66-71) then attempts embed. On embed failure, nodes are silently lost. Should defer removal until new items are ready, or restore old items on failure.
+- [ ] Error responses lack recovery hints - "Node not in index" should suggest "try notes-reindex"; embed failures should mention Ollama URL and suggest checking connectivity. Agents can't guess corrective actions.
+
 ## Should do
 
 - [ ] #+begin_src block handling in parser (markers stripped but content kept)

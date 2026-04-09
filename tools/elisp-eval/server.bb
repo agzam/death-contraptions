@@ -48,13 +48,7 @@ Common debugging patterns:
 Session hygiene:
 - Minimize UI disruption: open buffers in background (e.g., with-current-buffer, display-buffer) unless foreground is required.
 - Kill any temporary buffers created during diagnostic or exploratory work.
-- When modifying hooks, advice, or global state via config files, mirror those changes in the running session: remove stale hooks/advice before adding, reload features as needed.
-
-MCP server management:
-- After modifying an MCP server script (e.g., files in ~/.config/eca/tools/), restart it so changes take effect. Server names are keys in ~/.config/eca/config.json under mcpServers.
-  (let ((session (eca-session)))
-    (eca-api-notify session :method \"mcp/stopServer\" :params (list :name SERVER_NAME))
-    (run-with-timer 2 nil (lambda () (eca-api-notify (eca-session) :method \"mcp/startServer\" :params (list :name SERVER_NAME)))))"
+- When modifying hooks, advice, or global state via config files, mirror those changes in the running session: remove stale hooks/advice before adding, reload features as needed."
    :inputSchema
    {:type "object"
     :properties {:code {:type "string"
