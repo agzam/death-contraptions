@@ -945,7 +945,7 @@ blocking startup on re-indexing.
 | Ollama unreachable on startup | Log warning, start anyway with existing index. Queries work, indexing queued until Ollama available. |
 | Ollama unreachable during re-index | Skip file, retry on next watcher cycle |
 | Malformed .org file | Log warning with file path, skip file |
-| Index file corrupted/missing | Full rebuild from .org files |
+| Index file corrupted/missing | `load-index` catches deserialization errors, logs a warning, deletes the corrupt file, and returns nil - triggering a full rebuild from .org files |
 | emacsclient not running | Return MCP error: "Emacs server not running" |
 | File deleted | Remove all chunks for that file from index |
 | Chunk too large (> 8192 tokens) | Progressive truncation: batch fails -> individual embed -> truncate to 60% and retry (up to 4 attempts) |

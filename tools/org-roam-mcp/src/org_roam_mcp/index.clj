@@ -156,17 +156,24 @@
     (util/log "Index saved:" chunk-count "chunks")))
 
 (defn load-index
-  "Load index from disk. Returns [index meta] or nil if not found."
+  "Load index from disk. Returns [index meta] or nil if missing/corrupt.
+   Corrupt files are removed so a fresh build can proceed."
   [index-dir]
   (let [idx-file (index-path index-dir)
         m-file (meta-path index-dir)]
     (when (.exists idx-file)
       (util/log "Loading index from" (.getAbsolutePath idx-file))
-      (let [index (HnswIndex/load idx-file (.getClassLoader NoteItem))
-            meta (when (.exists m-file)
-                   (edn/read-string (slurp m-file)))]
-        (util/log "Loaded" (.size index) "items")
-        [index meta]))))
+      (try
+        (let [index (HnswIndex/load idx-file (.getClassLoader NoteItem))
+              meta (when (.exists m-file)
+                     (edn/read-string (slurp m-file)))]
+          (util/log "Loaded" (.size index) "items")
+          [index meta])
+        (catch Exception e
+          (util/log "WARN: index file corrupt or unreadable:" (.getMessage e))
+          (util/log "Removing corrupt index, will rebuild from scratch")
+          (try (.delete idx-file) (catch Exception _))
+          nil)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Full build / catch-up

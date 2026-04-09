@@ -23,7 +23,8 @@
 - [x] Index save debouncing - watcher saves at most every 30s via ScheduledExecutorService
 - [x] Ollama keep_alive "30m" on all embed API calls to prevent model unloading
 - [x] embed-batch consistency - :as :string + :throw-exceptions? false across all embed fns
-- [x] 30 tests, 103 assertions
+- [x] Graceful recovery on corrupt HNSW index - load-index catches deserialization errors, deletes corrupt file, falls back to full rebuild
+- [x] 32 tests, 107 assertions
 
 ## Should do
 

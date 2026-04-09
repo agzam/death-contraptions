@@ -419,6 +419,30 @@ Returns confirmation with the node-id and file path."
 ;; Write tool implementations
 ;; ---------------------------------------------------------------------------
 
+(defn- adjust-heading-levels
+  "Shift org headings in content so they nest under a heading at `parent-level`.
+   Finds the shallowest heading in content and shifts all headings so that
+   shallowest becomes (inc parent-level)."
+  [content parent-level]
+  (when content
+    (let [lines (str/split-lines content)
+          min-level (reduce (fn [acc line]
+                              (if-let [[_ stars] (re-matches #"^(\*+)\s.*" line)]
+                                (min acc (count stars))
+                                acc))
+                            Integer/MAX_VALUE lines)]
+      (if (= min-level Integer/MAX_VALUE)
+        content
+        (let [shift (- (inc parent-level) min-level)]
+          (if (zero? shift)
+            content
+            (str/join "\n"
+                      (mapv (fn [line]
+                              (if-let [[_ stars rest] (re-matches #"^(\*+)(\s.*)" line)]
+                                (str (apply str (repeat (max 1 (+ (count stars) shift)) \*)) rest)
+                                line))
+                            lines))))))))
+
 (defn- write-temp-content!
   "Write content to a temp file, return the path.
    Avoids elisp string escaping issues for multi-line content."
@@ -447,7 +471,8 @@ Returns confirmation with the node-id and file path."
                      (let [[y m d] date-parts]
                        (format "(encode-time 0 0 0 %d %d %d)" d m y))
                      "(current-time)")
-        content-file (write-temp-content! content)
+        adjusted (adjust-heading-levels content 2)
+        content-file (write-temp-content! adjusted)
         elisp (format
                "(progn
                   (require 'vulpea)
@@ -477,7 +502,10 @@ Returns confirmation with the node-id and file path."
 (defn- create-heading-under
   "Create a new sub-heading under an existing node."
   [title content parent-id]
-  (let [content-file (write-temp-content! content)
+  (let [parent-item (idx/get-item @hnsw-index parent-id)
+        parent-level (if parent-item (.-level ^org_roam_mcp.index.NoteItem parent-item) 1)
+        adjusted (adjust-heading-levels content (inc parent-level))
+        content-file (write-temp-content! adjusted)
         elisp (format
                "(progn
                   (require 'org-id)
@@ -571,7 +599,10 @@ Returns confirmation with the node-id and file path."
             edit-mode (or mode "append")]
         (if-not node-id
           {:content [{:type "text" :text "Node not found"}] :isError true}
-          (let [content-file (write-temp-content! content)
+          (let [item (idx/get-item @hnsw-index node-id)
+                node-level (if item (.-level ^org_roam_mcp.index.NoteItem item) 1)
+                adjusted (adjust-heading-levels content node-level)
+                content-file (write-temp-content! adjusted)
                 elisp (format
                        "(progn
                           (require 'org-id)

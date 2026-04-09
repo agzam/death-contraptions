@@ -111,7 +111,7 @@
                            :enum ["goto" "back" "forward" "reload"]}}}}
 
    {:name "browser-click"
-    :description "Click an element on the page. Find by CSS selector or by visible text content (case-insensitive substring match). Prioritizes clickable elements (buttons, links) when matching by text."
+    :description "Click an element on the page. Find by CSS selector, visible text, or viewport coordinates. Selector/text dispatch PointerEvent+MouseEvent for framework compatibility. Coordinates (x, y) perform an OS-level CGEvent click, bypassing all DOM event delegation."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"
@@ -119,7 +119,11 @@
                   :text {:type "string"
                          :description "Visible text content to match. Used when selector is not provided."}
                   :index {:type "integer"
-                          :description "Zero-based index when multiple elements match (default: 0)."}}}}
+                          :description "Zero-based index when multiple elements match (default: 0)."}
+                  :x {:type "number"
+                      :description "Viewport-relative X coordinate for OS-level click. Use with y. Coordinates from browser-query bounding rects work directly."}
+                  :y {:type "number"
+                      :description "Viewport-relative Y coordinate for OS-level click. Use with x. Coordinates from browser-query bounding rects work directly."}}}}
 
    {:name "browser-type"
     :description "Type text into an input, textarea, or contenteditable element. Dispatches input/change events for framework compatibility."
@@ -216,7 +220,7 @@
                             :description "Timeout in milliseconds (default: 10000)."}}}}
 
    {:name "browser-scroll"
-    :description "Scroll the page. Scroll to an element, to top/bottom, or by pixel amount in a direction."
+    :description "Scroll the page or a scrollable container. Scroll to an element, to top/bottom, or by pixel amount in a direction. Use container param to target nested scrollable areas like dialogs or modals."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"
@@ -228,7 +232,9 @@
                            :description "Pixels to scroll (default: 500). Used with direction."}
                   :to {:type "string"
                        :description "Scroll to absolute position: 'top', 'bottom', or 'element' (with selector)."
-                       :enum ["top" "bottom" "element"]}}}}])
+                       :enum ["top" "bottom" "element"]}
+                  :container {:type "string"
+                              :description "CSS selector for a scrollable container (e.g. '[role=\"dialog\"]'). Scrolls within this element instead of the page."}}}}])
 
 ;;; --- Existing Tool Implementations ---
 
@@ -412,12 +418,49 @@ wins[0].activeTab.url = %s;
           (Thread/sleep 1000)
           (wait-for-load 18)))))
 
+(defn click-at-coordinates
+  "Performs an OS-level click at screen coordinates via macOS CGEvent through JXA's ObjC bridge.
+  Uses osascript (not swift) for faster execution and consistency with the rest of the server."
+  [screen-x screen-y]
+  (let [script (str "ObjC.import('CoreGraphics');\n"
+                    "ObjC.import('Cocoa');\n"
+                    "if (!$.AXIsProcessTrusted()) {\n"
+                    "  var opts = $.NSDictionary.dictionaryWithObject_forKey_(true, $.kAXTrustedCheckOptionPrompt);\n"
+                    "  $.AXIsProcessTrustedWithOptions(opts);\n"
+                    "  throw new Error('Accessibility permission required. Grant access in System Settings > Privacy & Security > Accessibility for the host app, then retry.');\n"
+                    "}\n"
+                    "var p = $.CGPointMake(" (double screen-x) ", " (double screen-y) ");\n"
+                    "var down = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseDown, p, $.kCGMouseButtonLeft);\n"
+                    "var up = $.CGEventCreateMouseEvent(null, $.kCGEventLeftMouseUp, p, $.kCGMouseButtonLeft);\n"
+                    "$.CGEventPost($.kCGHIDEventTap, down);\n"
+                    "delay(0.05);\n"
+                    "$.CGEventPost($.kCGHIDEventTap, up);\n"
+                    "'ok';")
+        {:keys [exit out err]} (run-jxa script)]
+    (if (zero? exit)
+      {:ok (json/generate-string {:success true :clickedAt {:screenX (double screen-x) :screenY (double screen-y)}})}
+      {:error (str/trim (str out err))})))
+
 (defn browser-click
-  "Clicks an element found by CSS selector or visible text substring.
-  Text matching tries clickable elements first, then falls back to all DOM nodes."
-  [{:strs [selector text index]}]
-  (let [idx (or index 0)
-        js-code (format "
+  "Clicks an element by CSS selector, visible text, or viewport coordinates.
+  Coordinate mode performs an OS-level CGEvent click, bypassing framework event delegation."
+  [{:strs [selector text index x y]}]
+  (if (and x y)
+    ;; OS-level click at viewport coordinates via CGEvent
+    (let [info-result (exec-js-in-tab
+                       "JSON.stringify({screenX: window.screenX, screenY: window.screenY, outerHeight: window.outerHeight, innerHeight: window.innerHeight})")]
+      (if (:error info-result)
+        (wrap-result info-result)
+        (let [info (json/parse-string (:ok info-result) true)
+              toolbar-h (- (:outerHeight info) (:innerHeight info))
+              screen-x (+ (:screenX info) x)
+              screen-y (+ (:screenY info) toolbar-h y)]
+          (run-jxa (format "Application('%s').activate()" (default-browser)))
+          (Thread/sleep 200)
+          (wrap-result (click-at-coordinates screen-x screen-y)))))
+    ;; DOM-level click by selector or text
+    (let [idx (or index 0)
+          js-code (format "
 (function() {
   var matches = [];
   if (%s) {
@@ -449,9 +492,18 @@ wins[0].activeTab.url = %s;
   if (idx >= matches.length) return JSON.stringify({success: false, error: 'Index ' + idx + ' out of range, found ' + matches.length + ' matches'});
   var el = matches[idx];
   el.scrollIntoView({block: 'center', behavior: 'instant'});
-  el.dispatchEvent(new MouseEvent('mouseover', {bubbles: true}));
-  el.dispatchEvent(new MouseEvent('mousedown', {bubbles: true, cancelable: true}));
-  el.dispatchEvent(new MouseEvent('mouseup', {bubbles: true, cancelable: true}));
+  var rect = el.getBoundingClientRect();
+  var cx = rect.left + rect.width / 2;
+  var cy = rect.top + rect.height / 2;
+  var pOpts = {bubbles: true, cancelable: true, clientX: cx, clientY: cy, pointerId: 1, pointerType: 'mouse', isPrimary: true};
+  var mOpts = {bubbles: true, cancelable: true, clientX: cx, clientY: cy};
+  el.dispatchEvent(new PointerEvent('pointerover', pOpts));
+  el.dispatchEvent(new PointerEvent('pointerenter', Object.assign({}, pOpts, {bubbles: false})));
+  el.dispatchEvent(new MouseEvent('mouseover', mOpts));
+  el.dispatchEvent(new PointerEvent('pointerdown', pOpts));
+  el.dispatchEvent(new MouseEvent('mousedown', mOpts));
+  el.dispatchEvent(new PointerEvent('pointerup', pOpts));
+  el.dispatchEvent(new MouseEvent('mouseup', mOpts));
   el.click();
   return JSON.stringify({
     success: true,
@@ -467,8 +519,8 @@ wins[0].activeTab.url = %s;
                         (json/generate-string (or selector ""))
                         (boolean text)
                         (json/generate-string (or text ""))
-                        idx)]
-    (wrap-result (exec-js-in-tab js-code))))
+                          idx)]
+      (wrap-result (exec-js-in-tab js-code)))))
 
 (defn browser-type
   "Types text into an element, dispatching input/change events explicitly.
@@ -909,10 +961,12 @@ JSON.stringify(b);
                     (recur (inc attempt)))))))))))
 
 (defn browser-scroll
-  "Scrolls the page to an element, to top/bottom, or by pixel offset."
-  [{:strs [selector direction pixels to]}]
+  "Scrolls the page or a specific container to an element, to top/bottom, or by pixel offset.
+  When container selector is provided, scrolls within that element instead of the window."
+  [{:strs [selector direction pixels to container]}]
   (let [px (or pixels 500)
         js-code (cond
+                  ;; scrollIntoView already handles nested scroll containers
                   (and selector (or (= to "element") (nil? to)))
                   (format "
 (function() {
@@ -924,19 +978,50 @@ JSON.stringify(b);
 " (json/generate-string selector))
 
                   (= to "top")
-                  "window.scrollTo(0, 0); JSON.stringify({success: true, scrollY: 0, pageHeight: document.body.scrollHeight, viewportHeight: window.innerHeight})"
+                  (format "
+(function() {
+  var cSel = %s;
+  var c = cSel ? document.querySelector(cSel) : null;
+  if (cSel && !c) return JSON.stringify({success: false, error: 'Container not found'});
+  if (c) {
+    c.scrollTo(0, 0);
+    return JSON.stringify({success: true, scrollTop: 0, scrollHeight: c.scrollHeight, clientHeight: c.clientHeight});
+  }
+  window.scrollTo(0, 0);
+  return JSON.stringify({success: true, scrollY: 0, pageHeight: document.body.scrollHeight, viewportHeight: window.innerHeight});
+})()
+" (json/generate-string container))
 
                   (= to "bottom")
-                  "window.scrollTo(0, document.body.scrollHeight); JSON.stringify({success: true, scrollY: Math.round(window.scrollY), pageHeight: document.body.scrollHeight, viewportHeight: window.innerHeight})"
+                  (format "
+(function() {
+  var cSel = %s;
+  var c = cSel ? document.querySelector(cSel) : null;
+  if (cSel && !c) return JSON.stringify({success: false, error: 'Container not found'});
+  if (c) {
+    c.scrollTo(0, c.scrollHeight);
+    return JSON.stringify({success: true, scrollTop: Math.round(c.scrollTop), scrollHeight: c.scrollHeight, clientHeight: c.clientHeight});
+  }
+  window.scrollTo(0, document.body.scrollHeight);
+  return JSON.stringify({success: true, scrollY: Math.round(window.scrollY), pageHeight: document.body.scrollHeight, viewportHeight: window.innerHeight});
+})()
+" (json/generate-string container))
 
                   direction
                   (format "
 (function() {
+  var cSel = %s;
+  var c = cSel ? document.querySelector(cSel) : null;
+  if (cSel && !c) return JSON.stringify({success: false, error: 'Container not found'});
   var amount = %s === 'up' ? -%d : %d;
+  if (c) {
+    c.scrollBy(0, amount);
+    return JSON.stringify({success: true, scrollTop: Math.round(c.scrollTop), scrollHeight: c.scrollHeight, clientHeight: c.clientHeight});
+  }
   window.scrollBy(0, amount);
   return JSON.stringify({success: true, scrollY: Math.round(window.scrollY), pageHeight: document.body.scrollHeight, viewportHeight: window.innerHeight});
 })()
-" (json/generate-string direction) px px)
+" (json/generate-string container) (json/generate-string direction) px px)
 
                   :else
                   "JSON.stringify({success: false, error: 'Provide selector, direction, or to parameter'})")]

@@ -78,3 +78,26 @@
       ;; cleanup
       (doseq [f (reverse (file-seq (io/file dir)))]
         (.delete f)))))
+
+(deftest load-index-missing-test
+  (testing "returns nil when index directory has no index file"
+    (let [dir (str (System/getProperty "java.io.tmpdir") "/hnsw-empty-" (System/nanoTime))]
+      (.mkdirs (io/file dir))
+      (is (nil? (idx/load-index dir)))
+      ;; cleanup
+      (.delete (io/file dir)))))
+
+(deftest load-index-corrupt-test
+  (testing "returns nil and deletes corrupt index file"
+    (let [dir (str (System/getProperty "java.io.tmpdir") "/hnsw-corrupt-" (System/nanoTime))
+          idx-file (io/file dir "index.hnsw")]
+      (.mkdirs (io/file dir))
+      ;; write garbage bytes to simulate corruption
+      (with-open [os (java.io.FileOutputStream. idx-file)]
+        (.write os (byte-array (map byte [0 0 0 0 1 2 3]))))
+      (is (.exists idx-file))
+      (is (nil? (idx/load-index dir)))
+      (is (not (.exists idx-file)) "corrupt file should be deleted")
+      ;; cleanup
+      (doseq [f (reverse (file-seq (io/file dir)))]
+        (.delete f)))))

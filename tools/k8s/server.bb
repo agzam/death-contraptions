@@ -289,13 +289,18 @@
           (error-result (str "kubectl logs error: " err)))))))
 
 (defn do-pod-exec
-  "Run a command inside a pod container via kubectl exec."
+  "Run a command inside a pod container via kubectl exec.
+  Bypasses run-kubectl because kubectl-args must precede the `--` separator,
+  otherwise they get swallowed into the pod command."
   [{:strs [name command container] :as opts}]
-  (let [args (cond-> ["exec" name]
-               container (into ["-c" container])
-               true      (into ["--" "sh" "-c" command]))
-        {:keys [ok out err]} (run-kubectl args :opts opts)]
-    (if ok (text-result out) (error-result (str "kubectl exec error: " err)))))
+  (let [pre (cond-> ["exec" name]
+              container (into ["-c" container]))
+        cmd (into [kubectl-bin]
+                  (concat pre (kubectl-args opts) ["--" "sh" "-c" command]))
+        {:keys [exit out err]} (apply shell/sh cmd)]
+    (if (zero? exit)
+      (text-result (str/trim out))
+      (error-result (str "kubectl exec error: " (str/trim (str err "\n" out)))))))
 
 (defn do-events
   "Fetch cluster events sorted by time, optionally filtered to a specific resource."
