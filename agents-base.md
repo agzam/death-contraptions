@@ -45,6 +45,7 @@ Request more info from Jira when needed.
     - Org: org-lint, org-table-align (tables must be aligned, columns should not be too wide - add the column widh row for columns too wide, e.g., <50>)
 
 - Avoid using `>` in Lisp (Elisp, Clojure, Fennel, etc.) for comparison, always prefer `<`, unless it makes the code unreasonably confusing.
+- Never leave dangling parens, curly or square brackets in Clojure, EDN, Fennel, Lisp.
 
 - Always provide pointers when speaking about code. They must be in the easily browsable, respective forge format, i.e.,
   - https://github.com/ORG/REPO/blob/BRANCH/FILE.EXT#L1-L10
