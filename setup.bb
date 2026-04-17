@@ -29,7 +29,9 @@
    "splunk"      {:command "splunk/server.bb"
                   :platform :darwin}
    "org-roam-mcp" {:command "org-roam-mcp/start.sh"
-                   :platform :all}})
+                   :platform :all}
+   "kitty"        {:command "kitty/server.bb"
+                   :platform :darwin}})
 
 (defn load-local-config
   "Read local-config.edn, trying .gpg first (via gpg --decrypt), then plain."
@@ -166,6 +168,12 @@
         (spit (str claude-dir "claude_desktop_config.json")
               (json/generate-string {:mcpServers server-entries} {:pretty true}))
         (println (str "  wrote: " claude-dir "claude_desktop_config.json"))))
+
+    ;; CLAUDE.md symlink for Claude Code CLI
+    (let [claude-dir (str (System/getenv "HOME") "/.claude")]
+      (ensure-dir claude-dir)
+      (create-symlink (str claude-dir "/CLAUDE.md") (str eca-dir "/AGENTS.md"))
+      (println (str "  symlink: ~/.claude/CLAUDE.md -> ~/.config/eca/AGENTS.md")))
 
     ;; Symlinks
     (create-symlink (str eca-dir "/tools") tools-dir)
