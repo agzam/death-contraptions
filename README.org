@@ -23,8 +23,20 @@ Aimed to work with various AI fronts - Claude Code CLI, ECA, Claude Desktop, gpt
 bb setup.bb
 #+end_src
 
-This generates config files and symlinks for all supported consumers:
-- =~/.config/eca/config.json= (Claude Code CLI / ECA)
-- =~/Library/Application Support/Claude/claude_desktop_config.json= (Claude Desktop, macOS)
-- Symlinks =~/.config/eca/tools= and =~/.config/eca/skills= to this repo
+Every run of =bb setup.bb= propagates =agents-base.md= (rules), MCP servers, and skills to every consumer:
+
+- =~/.config/eca/AGENTS.md= - source of truth, generated from =agents-base.md=.
+- =~/.config/eca/config.json= - ECA config (model, agent, MCP servers).
+- =~/.config/eca/tools= / =~/.config/eca/skills= - symlinks into this repo.
+- =~/.claude.json= =mcpServers= - merged for Claude Code CLI (preserves other keys).
+- =~/.claude/CLAUDE.md= -> =~/.config/eca/AGENTS.md= - Claude Code CLI user-scope memory.
+- =~/.claude/skills= -> =<repo>/skills= - Claude Code CLI skills.
+- =<repo>/CLAUDE.md= -> =~/.config/eca/AGENTS.md= - Claude Code CLI project-scope memory.
+- =<repo>/AGENTS.md= -> =~/.config/eca/AGENTS.md= - for agents that follow the =AGENTS.md= convention (e.g. Codex CLI).
+- =~/Library/Application Support/Claude/claude_desktop_config.json= (macOS) or =~/.config/Claude/claude_desktop_config.json= (Linux) - Claude Desktop local MCP servers.
+- =claude.ai= server-side =conversation_preferences= (Settings -> Personal preferences) - pushed via =PUT /api/account_profile=. The implementation dispatches by OS: on macOS, =osascript= drives a logged-in Brave/Chrome/Safari tab and performs the PUT using the browser's session; on Linux, the AGENTS.md body is piped to =wl-copy= / =xclip= / =xsel= and you paste it into Settings -> Personal preferences once; on other platforms the setup prints a manual-paste instruction. Any step that cannot find what it needs (no browser tab, no clipboard tool, etc.) prints =skipped:= and moves on without failing the rest of setup.
+
+Claude Desktop's chat UI does not read a local instructions file; the push into =conversation_preferences= is the only channel that delivers rules to it. Its agent / Cowork mode runs in a sandboxed VM with Anthropic's own system prompt and does not pick up =AGENTS.md= directly; mount this repo as a Cowork workspace folder if you want the =CLAUDE.md= symlink visible inside that sandbox.
+
+For gptel in Emacs, the elisp glue lives at =~/.doom.d/modules/custom/ai/autoload/gptel.el= and =~/.doom.d/modules/custom/ai/config.el=. =+llm-eca-agents-md-content= reads =~/.config/eca/AGENTS.md= and is wired into both =(alist-get 'default gptel-directives)= and =gptel--system-message=, so every =gptel-send=, =gptel-request=, and =ob-gptel= block uses the rules. =+llm-mcp-servers-from-eca-config= populates =mcp-hub-servers= from =~/.config/eca/config.json=, and =gptel-agent-skill-dirs= includes =~/.config/eca/skills/=.
 

@@ -14,7 +14,23 @@
 (def tools-dir (str repo-dir "/tools"))
 (def skills-dir (str repo-dir "/skills"))
 (def eca-dir (str (System/getenv "HOME") "/.config/eca"))
-(def mac? (str/includes? (System/getProperty "os.name") "Mac"))
+(def os-kind
+  (let [os (str/lower-case (System/getProperty "os.name"))]
+    (cond (str/includes? os "mac") :macos
+          (str/includes? os "linux") :linux
+          :else :other)))
+
+(def mac? (= os-kind :macos))
+
+(defn- claude-desktop-config-dir
+  "Where Claude Desktop reads its config JSON on this platform."
+  []
+  (case os-kind
+    :macos (str (System/getenv "HOME") "/Library/Application Support/Claude/")
+    :linux (str (or (System/getenv "XDG_CONFIG_HOME")
+                    (str (System/getenv "HOME") "/.config"))
+                "/Claude/")
+    nil))
 
 ;; Server registry: name -> {:command, :platform}
 (def servers
@@ -129,10 +145,112 @@
       (java.nio.file.Files/delete link-path))
     (java.nio.file.Files/createSymbolicLink link-path target-path (into-array java.nio.file.attribute.FileAttribute []))))
 
+(defn- b64-encode
+  "UTF-8 base64 encode for safely smuggling large strings through osascript."
+  [^String s]
+  (.encodeToString (java.util.Base64/getEncoder) (.getBytes s "UTF-8")))
+
+(defn- find-claude-tab-osa
+  "Return AppleScript that finds first claude.ai tab in BROWSER app.
+  Result is 'windowIndex,tabIndex' or empty string."
+  [browser]
+  (format "tell application \"%s\"
+  if (count of windows) = 0 then return \"\"
+  set w to 0
+  repeat with win in windows
+    set w to w + 1
+    set t to 0
+    repeat with tb in tabs of win
+      set t to t + 1
+      if URL of tb starts with \"https://claude.ai\" then
+        return (w as string) & \",\" & (t as string)
+      end if
+    end repeat
+  end repeat
+  return \"\"
+end tell" browser))
+
+(defmulti push-claude-web-preferences!
+  "Sync AGENTS.md into claude.ai's server-side Personal preferences
+  (conversation_preferences on /api/account_profile). Implementation
+  dispatches by OS: macOS drives the logged-in browser via osascript,
+  Linux copies to clipboard so the user can paste, unknown platforms
+  print a manual instruction."
+  (fn [_content] os-kind))
+
+(defmethod push-claude-web-preferences! :macos [content]
+  (try
+    (let [payload (b64-encode (json/generate-string {:conversation_preferences content}))
+          js (str "(function(){"
+                  "var body=atob('" payload "');"
+                  "var x=new XMLHttpRequest();"
+                  "x.open('PUT','/api/account_profile',false);"
+                  "x.setRequestHeader('Content-Type','application/json');"
+                  "x.withCredentials=true;"
+                  "x.send(body);"
+                  "return x.status+'';"
+                  "})()")
+          browsers ["Brave Browser" "Google Chrome" "Safari"]
+          found (some (fn [b]
+                        (let [r (proc/sh ["osascript" "-e" (find-claude-tab-osa b)])
+                              loc (str/trim (:out r))]
+                          (when (and (zero? (:exit r)) (not (str/blank? loc)))
+                            [b loc])))
+                      browsers)]
+      (if-not found
+        (println "  skipped: claude.ai Personal preferences (no claude.ai tab open in Brave/Chrome/Safari)")
+        (let [[browser loc] found
+              [win tab] (str/split loc #",")
+              tmp (java.io.File/createTempFile "dc-sync-" ".scpt")
+              osa (format "tell application \"%s\"
+  tell tab %s of window %s
+    execute javascript %s
+  end tell
+end tell"
+                          browser tab win
+                          (pr-str js))]
+          (spit tmp osa)
+          (let [r (proc/sh ["osascript" (.getAbsolutePath tmp)])
+                out (str/trim (:out r))]
+            (.delete tmp)
+            (cond
+              (not (zero? (:exit r)))
+              (println (str "  warn: claude.ai sync via " browser " failed: "
+                            (str/trim (:err r))))
+              (str/starts-with? out "200")
+              (println (str "  wrote: claude.ai Personal preferences via " browser))
+              :else
+              (println (str "  warn: claude.ai sync unexpected response: " out)))))))
+    (catch Exception e
+      (println (str "  skipped: claude.ai sync errored: " (.getMessage e))))))
+
+(defmethod push-claude-web-preferences! :linux [content]
+  (try
+    (let [which (fn [cmd] (zero? (:exit (proc/sh ["which" cmd]))))
+          clip-cmd (cond
+                     (which "wl-copy")  ["wl-copy"]
+                     (which "xclip")    ["xclip" "-selection" "clipboard"]
+                     (which "xsel")     ["xsel" "--clipboard" "--input"])]
+      (if clip-cmd
+        (do
+          @(proc/process clip-cmd {:in content})
+          (println (str "  copied AGENTS.md to clipboard via " (first clip-cmd)
+                        "; paste into claude.ai Settings -> Personal preferences")))
+        (println "  skipped: claude.ai Personal preferences (install wl-copy / xclip / xsel, or paste ~/.config/eca/AGENTS.md by hand)")))
+    (catch Exception e
+      (println (str "  skipped: claude.ai push errored: " (.getMessage e))))))
+
+(defmethod push-claude-web-preferences! :default [_content]
+  (println "  skipped: claude.ai Personal preferences auto-push not implemented here; paste ~/.config/eca/AGENTS.md into Settings -> Personal preferences manually"))
+
 (defn -main
-  "Run the full setup: load local config, build and write ECA config.json and
-  AGENTS.md, optionally write Claude Desktop config, and create symlinks for
-  tools/skills into ~/.config/eca/."
+  "Propagate AGENTS.md, MCP servers, and skills to every consumer so a single
+  edit of agents-base.md flows everywhere on re-run. Writes ECA's
+  config.json/AGENTS.md, merges mcpServers into ~/.claude.json (Claude Code
+  CLI), symlinks Claude Code CLI's CLAUDE.md and skills, writes Claude
+  Desktop's claude_desktop_config.json (macOS), and pushes AGENTS.md into
+  claude.ai's server-side Personal preferences via an already-open browser
+  tab so Claude Desktop chat picks it up too."
   []
   (println "Setting up death-contraptions...")
   (println (str "  repo: " repo-dir))
@@ -161,19 +279,43 @@
       (spit agents-path agents-content)
       (println (str "  wrote: " agents-path)))
 
-    ;; Claude Desktop config (macOS only)
-    (when mac?
-      (let [claude-dir (str (System/getenv "HOME") "/Library/Application Support/Claude/")]
-        (ensure-dir claude-dir)
-        (spit (str claude-dir "claude_desktop_config.json")
-              (json/generate-string {:mcpServers server-entries} {:pretty true}))
-        (println (str "  wrote: " claude-dir "claude_desktop_config.json"))))
+    ;; Claude Desktop local MCP config (platform-specific path).
+    (when-let [dir (claude-desktop-config-dir)]
+      (ensure-dir dir)
+      (spit (str dir "claude_desktop_config.json")
+            (json/generate-string {:mcpServers server-entries} {:pretty true}))
+      (println (str "  wrote: " dir "claude_desktop_config.json")))
 
-    ;; CLAUDE.md symlink for Claude Code CLI
-    (let [claude-dir (str (System/getenv "HOME") "/.claude")]
+    ;; Push AGENTS.md into claude.ai's server-side Personal preferences.
+    ;; This is the only channel through which rules reach Desktop chat,
+    ;; so it runs on every platform (implementation dispatches by OS).
+    (push-claude-web-preferences! agents-content)
+
+    ;; Claude Code CLI: user-scope CLAUDE.md, skills symlink, and mcpServers
+    ;; merged into ~/.claude.json (preserving other keys like oauth tokens
+    ;; and preferences). Claude Desktop's agent/cowork mode runs Claude Code
+    ;; under the hood, so fixing Claude Code CLI also fixes that surface.
+    (let [claude-dir (str (System/getenv "HOME") "/.claude")
+          claude-json (str (System/getenv "HOME") "/.claude.json")]
       (ensure-dir claude-dir)
       (create-symlink (str claude-dir "/CLAUDE.md") (str eca-dir "/AGENTS.md"))
-      (println (str "  symlink: ~/.claude/CLAUDE.md -> ~/.config/eca/AGENTS.md")))
+      (println "  symlink: ~/.claude/CLAUDE.md -> ~/.config/eca/AGENTS.md")
+      (create-symlink (str claude-dir "/skills") skills-dir)
+      (println (str "  symlink: ~/.claude/skills -> " skills-dir))
+      (when (.exists (io/file claude-json))
+        (let [existing (json/parse-string (slurp claude-json) true)
+              updated (assoc existing :mcpServers server-entries)]
+          (spit claude-json (json/generate-string updated {:pretty true}))
+          (println (str "  wrote: " claude-json " (mcpServers)")))))
+
+    ;; Project-root rule files. Claude Code CLI only scans for CLAUDE.md at
+    ;; the project root (AGENTS.md is ignored), so the CLAUDE.md symlink is
+    ;; the one that actually enables project-scope memory. AGENTS.md is kept
+    ;; as a symlink for other agents (Codex CLI, etc.) that look for it.
+    (create-symlink (str repo-dir "/AGENTS.md") (str eca-dir "/AGENTS.md"))
+    (println (str "  symlink: " repo-dir "/AGENTS.md -> ~/.config/eca/AGENTS.md"))
+    (create-symlink (str repo-dir "/CLAUDE.md") (str eca-dir "/AGENTS.md"))
+    (println (str "  symlink: " repo-dir "/CLAUDE.md -> ~/.config/eca/AGENTS.md"))
 
     ;; Symlinks
     (create-symlink (str eca-dir "/tools") tools-dir)

@@ -1,5 +1,7 @@
 local-config.edn
 tools/*/config.edn
+/AGENTS.md
+/CLAUDE.md
 
 # Clojure
 .cpcache/
