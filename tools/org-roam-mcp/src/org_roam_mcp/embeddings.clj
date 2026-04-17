@@ -11,7 +11,8 @@
    Returns a vector of float arrays, one per input text.
    Prefixes each text with 'search_document: ' per nomic-embed-text conventions.
    Empty/blank texts are replaced with a placeholder to avoid API errors."
-  [{:keys [ollama-url model]} texts]
+  [{:keys [ollama-url model] :as config} texts]
+  (util/ensure-ssh-tunnel! config)
   (let [prefixed (mapv (fn [t]
                          (let [s (str "search_document: " t)]
                            (if (< (count s) 18)
@@ -35,7 +36,8 @@
 
 (defn embed-query
   "Embed a single query string with 'search_query: ' prefix for retrieval."
-  [{:keys [ollama-url model]} text]
+  [{:keys [ollama-url model] :as config} text]
+  (util/ensure-ssh-tunnel! config)
   (let [resp (hc/request
               {:url                (str ollama-url "/api/embed")
                :method             :post
@@ -57,6 +59,7 @@
 (defn- embed-single-with-truncation
   "Embed a single text, truncating progressively on context-length errors."
   [config text]
+  (util/ensure-ssh-tunnel! config)
   (loop [t (str "search_document: " text)
          attempt 0]
     (if (< 3 attempt)

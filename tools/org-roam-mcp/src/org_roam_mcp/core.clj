@@ -512,7 +512,11 @@ Returns confirmation with the node-id and file path."
     (emacs/eval-sexp elisp)))
 
 (defn- create-heading-under
-  "Create a new sub-heading under an existing node."
+  "Create a sub-heading at the END of a parent node's subtree.
+   Uses `org-narrow-to-subtree` + `(goto-char (point-max))` so the new
+   heading is always appended as the last child, regardless of whether
+   the parent already has children, trailing blank lines, or a same-level
+   sibling following."
   [title content parent-id]
   (let [parent-item (idx/get-item @hnsw-index parent-id)
         parent-level (if parent-item (.-level ^org_roam_mcp.index.NoteItem parent-item) 1)
@@ -526,18 +530,26 @@ Returns confirmation with the node-id and file path."
                                  (insert-file-contents \"%s\")
                                  (buffer-string))))
                     (if (not loc) \"ERROR:parent-not-found\"
-                      (switch-to-buffer (marker-buffer loc))
-                      (goto-char loc)
-                      (let ((parent-level (org-current-level))
-                            (new-id (org-id-new)))
-                        (org-end-of-subtree t)
-                        (insert \"\\n\" (make-string (1+ parent-level) ?*) \" %s\\n\"
-                                \":PROPERTIES:\\n\"
-                                \":ID:       \" new-id \"\\n\"
-                                \":END:\\n\\n\"
-                                body \"\\n\")
-                        (save-buffer)
-                        (format \"%%s|%%s\" new-id (buffer-file-name))))))"
+                      (with-current-buffer (marker-buffer loc)
+                        (save-excursion
+                          (goto-char loc)
+                          (let ((parent-level (org-current-level))
+                                (new-id (org-id-new)))
+                            (save-restriction
+                              (org-narrow-to-subtree)
+                              (goto-char (point-max))
+                              (unless (bolp) (insert \"\\n\"))
+                              (unless (or (= (point) (point-min))
+                                          (save-excursion (forward-line -1) (looking-at-p \"^[ \\t]*$\")))
+                                (insert \"\\n\"))
+                              (insert (make-string (1+ parent-level) ?*) \" %s\\n\"
+                                      \":PROPERTIES:\\n\"
+                                      \":ID:       \" new-id \"\\n\"
+                                      \":END:\\n\\n\"
+                                      body)
+                              (unless (bolp) (insert \"\\n\")))
+                            (save-buffer)
+                            (format \"%%s|%%s\" new-id (buffer-file-name))))))))"
                (escape-elisp-string parent-id) content-file
                (escape-elisp-string (or title "Note")))]
     (emacs/eval-sexp elisp)))
