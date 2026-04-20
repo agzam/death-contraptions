@@ -47,6 +47,13 @@ Request more info from Jira when needed.
 - Avoid using `>` in Lisp (Elisp, Clojure, Fennel, etc.) for comparison, always prefer `<`, unless it makes the code unreasonably confusing.
 - Never leave dangling parens, curly or square brackets in Clojure, EDN, Fennel, Lisp.
 
+- Never hard-wrap prose in Org-mode or Markdown files. Keep each paragraph
+  on a single line, regardless of length. This applies to both new content
+  you write and edits to existing content. Only insert a newline for an
+  actual paragraph break (blank line), a heading, a list item, a code/quote
+  block boundary, a table row, a property drawer line, or other structural
+  element - never to satisfy a column width like 70/80/100.
+
 - Always provide pointers when speaking about code. They must be in the easily browsable, respective forge format, i.e.,
   - https://github.com/ORG/REPO/blob/BRANCH/FILE.EXT#L1-L10
   - https://gitlab.com/ORG/REPO/-/blob/BRANCH/FILE.EXT?ref_type=heads#L1-L10
