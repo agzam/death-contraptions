@@ -272,10 +272,13 @@ end tell"
       (println (str "  wrote: " config-path))
       (println (str "  servers: " (str/join ", " (keys server-entries)))))
 
-    ;; Write AGENTS.md (remove old read-only file if present)
-    (let [agents-path (str eca-dir "/AGENTS.md")]
-      (when (.exists (io/file agents-path))
-        (.setWritable (io/file agents-path) true))
+    ;; Write AGENTS.md as a real file in the repo; ~/.config/eca/AGENTS.md
+    ;; becomes a symlink to it below. Delete any pre-existing path (symlink
+    ;; or file) first so `spit` doesn't follow an old symlink and write to
+    ;; the wrong target.
+    (let [agents-path (str repo-dir "/AGENTS.md")
+          p (java.nio.file.Paths/get agents-path (into-array String []))]
+      (java.nio.file.Files/deleteIfExists p)
       (spit agents-path agents-content)
       (println (str "  wrote: " agents-path)))
 
@@ -298,8 +301,8 @@ end tell"
     (let [claude-dir (str (System/getenv "HOME") "/.claude")
           claude-json (str (System/getenv "HOME") "/.claude.json")]
       (ensure-dir claude-dir)
-      (create-symlink (str claude-dir "/CLAUDE.md") (str eca-dir "/AGENTS.md"))
-      (println "  symlink: ~/.claude/CLAUDE.md -> ~/.config/eca/AGENTS.md")
+      (create-symlink (str claude-dir "/CLAUDE.md") (str repo-dir "/AGENTS.md"))
+      (println (str "  symlink: ~/.claude/CLAUDE.md -> " repo-dir "/AGENTS.md"))
       (create-symlink (str claude-dir "/skills") skills-dir)
       (println (str "  symlink: ~/.claude/skills -> " skills-dir))
       (when (.exists (io/file claude-json))
@@ -308,14 +311,14 @@ end tell"
           (spit claude-json (json/generate-string updated {:pretty true}))
           (println (str "  wrote: " claude-json " (mcpServers)")))))
 
-    ;; Project-root rule files. Claude Code CLI only scans for CLAUDE.md at
-    ;; the project root (AGENTS.md is ignored), so the CLAUDE.md symlink is
-    ;; the one that actually enables project-scope memory. AGENTS.md is kept
-    ;; as a symlink for other agents (Codex CLI, etc.) that look for it.
-    (create-symlink (str repo-dir "/AGENTS.md") (str eca-dir "/AGENTS.md"))
-    (println (str "  symlink: " repo-dir "/AGENTS.md -> ~/.config/eca/AGENTS.md"))
-    (create-symlink (str repo-dir "/CLAUDE.md") (str eca-dir "/AGENTS.md"))
-    (println (str "  symlink: " repo-dir "/CLAUDE.md -> ~/.config/eca/AGENTS.md"))
+    ;; Symlinks that point back to the real AGENTS.md in the repo. The
+    ;; canonical location is the repo (tracked via agents-base.md plus
+    ;; local extras, output path gitignored); everywhere else is a symlink
+    ;; so a single setup.bb run keeps every consumer in sync.
+    (create-symlink (str eca-dir "/AGENTS.md") (str repo-dir "/AGENTS.md"))
+    (println (str "  symlink: ~/.config/eca/AGENTS.md -> " repo-dir "/AGENTS.md"))
+    (create-symlink (str repo-dir "/CLAUDE.md") (str repo-dir "/AGENTS.md"))
+    (println (str "  symlink: " repo-dir "/CLAUDE.md -> " repo-dir "/AGENTS.md"))
 
     ;; Symlinks
     (create-symlink (str eca-dir "/tools") tools-dir)
