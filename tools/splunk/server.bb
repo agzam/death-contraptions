@@ -215,11 +215,13 @@
     (if-not (= 201 status)
       {:error (str "Failed to create search job (HTTP " status "): " (pr-str body))}
       (let [sid (get-in body [:sid])]
-        ;; 2. Poll for completion (up to 120s)
+        ;; 2. Poll for completion. Budget stays under typical MCP harness
+        ;; timeouts (~60s) so the server emits a distinct timeout error
+        ;; instead of going silent while the client gives up.
         (loop [elapsed 0]
           (Thread/sleep 2000)
-          (let [{:keys [body]} (splunk-get (str "/services/search/jobs/" sid))
-                state (get-in body [:entry 0 :content :dispatchState])
+          (let [{:keys [status body]} (splunk-get (str "/services/search/jobs/" sid))
+                state (when (map? body) (get-in body [:entry 0 :content :dispatchState]))
                 done? (= "DONE" state)
                 failed? (= "FAILED" state)]
             (cond
@@ -236,8 +238,11 @@
               failed?
               {:error (str "Search job failed: " (get-in body [:entry 0 :content :messages]))}
 
-              (< 120000 (+ elapsed 2000))
-              {:error "Search timed out after 120s"}
+              (not (map? body))
+              {:error (str "Unexpected non-JSON response from Splunk (HTTP " status ")")}
+
+              (< 45000 (+ elapsed 2000))
+              {:error "Search timed out after 45s"}
 
               :else
               (recur (+ elapsed 2000)))))))))
