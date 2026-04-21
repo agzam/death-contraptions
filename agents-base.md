@@ -56,6 +56,8 @@ Use `json` template, pipe it to `jq` if necessary - e.g., `jira view PROJ-12345 
 Using json template fetches comments, subtasks and linked items.
 Request more info from Jira when needed.
 
+For scripted writes (add a comment, edit a field, etc.), `jira comment` / `jira edit` hang: they prompt for y/n after `$EDITOR` returns, which the `EDITOR="cp ..."` trick cannot answer. Use `jira req -M POST /rest/api/2/issue/KEY/comment` with an inline JSON body instead, and the analogous REST paths for other writes.
+
 # Code
 
 - Functions and methods must have properly formatted, brief, simple docstrings explaining the reasoning - not retelling (already codified) functionality.
