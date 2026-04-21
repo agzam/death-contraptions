@@ -6,13 +6,27 @@
 
 # Context Completeness
 
-Always strive for deep and complete analysis of ingested context - Jira tickets, pull requests, Slack threads, and any other external source.
+Always strive for deep and complete analysis of ingested context - Jira tickets, pull requests, Slack threads, the codebase itself, and any other source.
+
+## External sources
 
 When an attachment, embed, or linked resource cannot be accessed (no skill or MCP, auth-gated service, MS Teams/SharePoint/Google Drive/video hosts/proprietary viewers, etc.), never silently ignore it. In your response:
 
 - List each unextracted item - source, what it is, why it could not be accessed.
 - State that analysis is incomplete with respect to those items.
 - Offer the user the option to provide the content manually.
+
+## Codebase freshness
+
+Before analyzing a codebase, check repo state so analysis is not based on stale code.
+
+- Start with `git fetch` and `git status` (both non-destructive).
+- Clean tree on main/master: `git pull --ff-only`, then analyze.
+- Clean tree on any other branch: do not pull. Report current branch and ahead/behind counts relative to its own origin, then ask whether to pull or analyze the current commit.
+- Dirty tree (staged, unstaged, or untracked): never pull. Analyze as-is and state in your response that analysis is based on local uncommitted state, which may differ from origin.
+- For review or diff-style analysis, also report divergence from `origin/main` (ahead/behind counts).
+
+Do not run git commands that mutate the working tree or branch state (stash, reset, checkout, merge, rebase, pull --rebase/--force, clean) without explicit user instruction.
 
 # MCP
 
