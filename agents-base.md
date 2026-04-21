@@ -4,6 +4,16 @@
 - Never use bold (**text**) or italic (*text*) emphasis in responses.
 - Avoid using em-dash, prefer simpler hyphens instead.
 
+# Context Completeness
+
+Always strive for deep and complete analysis of ingested context - Jira tickets, pull requests, Slack threads, and any other external source.
+
+When an attachment, embed, or linked resource cannot be accessed (no skill or MCP, auth-gated service, MS Teams/SharePoint/Google Drive/video hosts/proprietary viewers, etc.), never silently ignore it. In your response:
+
+- List each unextracted item - source, what it is, why it could not be accessed.
+- State that analysis is incomplete with respect to those items.
+- Offer the user the option to provide the content manually.
+
 # MCP
 
 - After modifying any MCP server code or config, restart the affected server(s) immediately via elisp-eval - do not ask or inform the user, just do it:

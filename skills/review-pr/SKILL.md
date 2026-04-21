@@ -61,3 +61,4 @@ Provide a concise review with:
  - When the relevant code present locally: /path/to/file.ext:1-42
  - Make it easy to reason about changes, show inlined diffs when it makes sense
 3. Questions for the author if context is unclear.
+4. Any Jira/PR/Slack attachments or linked resources that could not be accessed, per `# Context Completeness` in AGENTS.md.
