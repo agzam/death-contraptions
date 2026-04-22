@@ -1,5 +1,6 @@
 local-config.edn
 tools/*/config.edn
+tools/qlik-kb/bin/
 /AGENTS.md
 /CLAUDE.md
 

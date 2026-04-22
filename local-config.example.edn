@@ -18,7 +18,8 @@
                  :ssh-tunnel {:enabled false
                               :host "your-ollama-host"
                               :remote-port 11434
-                              :local-port 11434}}}
+                              :local-port 11434}}
+  :qlik-kb {:qcs-api-token "your_qcs_api_token"}}
 
  ;; Extra content appended to AGENTS.md (optional)
  ;; :agents-extra "..."

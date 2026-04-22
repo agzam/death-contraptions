@@ -38,6 +38,18 @@ Do not run git commands that mutate the working tree or branch state (stash, res
     ```
 - All custom MCP servers are experimental. When using any of them, note and report to the user any: empty/cryptic errors, inconsistent state, silent failures, or workarounds you had to use - so the MCP can be improved.
 
+# Tool routing
+
+Reach for the narrowest tool that can answer the question. Default mapping:
+
+- Qlik-internal topics - internal dev portal (`internal.qlik.dev`) engineering docs, QAC design reviews and ADRs, Condens user-research reports, Qlik user personas - use the `qlik-kb` search tools first. Each search response embeds a source-citation template for that KB; honor it in any summary you produce.
+- External library, framework, or API docs, and current events - `web_search`.
+- Personal notes, journal entries, decisions - `org-roam-mcp` (`notes-search`, `notes-backlinks`, `notes-read`).
+- Code in the current workspace - `eca__grep` and the built-in codebase tools.
+- Mixed: for a Qlik-internal concept that also lives in code, search `qlik-kb` first to anchor the idea, then `eca__grep` to locate it in the checked-out repo.
+
+If a `qlik-kb` search returns auth or connectivity errors, do not loop on it. Fall back to `web_search` against the public `qlik.dev` and `help.qlik.com` docs, and surface the failure so the token or access can be fixed.
+
 # GIT
 
 ABSOLUTE RULE: Never run any `git` or `gh` command that writes, mutates, or publishes state unless the user's CURRENT message EXPLICITLY commands that specific action. "Explicit" means the user's message names the action word itself: commit, push, merge, rebase, reset, revert, amend, force, open/create PR, merge PR, close PR, delete branch, tag, release, trigger workflow, etc. Anything softer than that is NOT permission.

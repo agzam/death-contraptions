@@ -47,7 +47,9 @@
    "org-roam-mcp" {:command "org-roam-mcp/start.sh"
                    :platform :all}
    "kitty"        {:command "kitty/server.bb"
-                   :platform :darwin}})
+                   :platform :darwin}
+   "qlik-kb"      {:command "qlik-kb/server.bb"
+                   :platform :all}})
 
 (defn load-local-config
   "Read local-config.edn, trying .gpg first (via gpg --decrypt), then plain."
@@ -329,6 +331,15 @@ end tell"
 
     (create-symlink (str eca-dir "/skills") skills-dir)
     (println (str "  symlink: ~/.config/eca/skills -> " skills-dir))
+
+    ;; qlik-kb runs an out-of-repo prebuilt binary cached under tools/qlik-kb/bin.
+    ;; Warn (non-fatal) when it's missing so first-run or post-pull users know
+    ;; to fetch it explicitly rather than discovering the failure inside a chat.
+    (when (contains? server-entries "qlik-kb")
+      (let [bin (str tools-dir "/qlik-kb/bin/mcp-qlik-kb-server")]
+        (when-not (.canExecute (io/file bin))
+          (println (str "  warn: qlik-kb binary missing at " bin))
+          (println (str "        run: bb " tools-dir "/qlik-kb/update.bb")))))
 
     (println "Done.")))
 
