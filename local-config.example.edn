@@ -1,9 +1,9 @@
 ;; Copy this file to local-config.edn (or local-config.edn.gpg for encryption)
 ;; and fill in your values.
 ;;
-;; Servers listed here get their :config written to config.edn in each tool dir.
+;; Each :servers entry is flat config written as-is to the tool's config.edn.
 ;; Servers not listed use defaults from their existing config.edn.
-;; Set :enabled false to exclude a server entirely.
+;; Reserved meta: :disabled? true skips the server entirely (default: enabled).
 
 {;; ECA/Claude Code settings (merged into config.json top-level)
  :eca
@@ -12,13 +12,13 @@
           :plan {:variant "max"}}}
 
  :servers
- {:slack {:config {:default-host "your-workspace.slack.com"}}
-  :splunk {:config {:host "your-instance.splunkcloud.com"}}
-  :org-roam-mcp {:config {:ollama-url "http://localhost:11434"
-                           :ssh-tunnel {:enabled false
-                                        :host "your-ollama-host"
-                                        :remote-port 11434
-                                        :local-port 11434}}}}
+ {:slack {:default-host "your-workspace.slack.com"}
+  :splunk {:host "your-instance.splunkcloud.com"}
+  :org-roam-mcp {:ollama-url "http://localhost:11434"
+                 :ssh-tunnel {:enabled false
+                              :host "your-ollama-host"
+                              :remote-port 11434
+                              :local-port 11434}}}
 
  ;; Extra content appended to AGENTS.md (optional)
  ;; :agents-extra "..."

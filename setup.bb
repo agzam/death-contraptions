@@ -96,7 +96,9 @@
 
 (defn build-server-entries
   "Build the mcpServers map for config.json.
-   Writes per-server config.edn files from :config in local-config."
+   Each :servers entry in local-config is flat key/value config written
+   verbatim to the tool's config.edn, minus the reserved :disabled? flag
+   which setup.bb strips. Default is enabled; :disabled? true skips."
   [local-config]
   (let [local-servers (:servers local-config {})]
     (reduce-kv
@@ -104,11 +106,12 @@
        (if-not (platform-matches? platform)
          acc
          (let [local (get local-servers (keyword name) {})
-               enabled? (get local :enabled true)]
-           (if-not enabled?
+               disabled? (:disabled? local false)
+               cfg (dissoc local :disabled?)]
+           (if disabled?
              acc
              (do
-               (when-let [cfg (:config local)]
+               (when (seq cfg)
                  (write-server-config! name cfg))
                (assoc acc name {:command (str tools-dir "/" command)}))))))
      {}
