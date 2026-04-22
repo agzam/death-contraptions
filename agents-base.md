@@ -40,10 +40,31 @@ Do not run git commands that mutate the working tree or branch state (stash, res
 
 # GIT
 
-- Never perform any git modification ops - commit, push, branch deletion, etc., unless explicitly instructed.
-- Never add Co-Authored-By, co-authored-by, or any AI/agent attribution lines to git commits.
-- Do not modify or push pull-requests unless explicitly commanded.
-- Never trigger a GHA workflow without asking
+ABSOLUTE RULE: Never run any `git` or `gh` command that writes, mutates, or publishes state unless the user's CURRENT message EXPLICITLY commands that specific action. "Explicit" means the user's message names the action word itself: commit, push, merge, rebase, reset, revert, amend, force, open/create PR, merge PR, close PR, delete branch, tag, release, trigger workflow, etc. Anything softer than that is NOT permission.
+
+- Finishing a task is NEVER permission to publish its result. Requests like "fix the bug", "implement X", "clean up Y", "it's ready", "ship it", "looks good" permit LOCAL edits only - not commit, not push, not PR.
+- Prior permission NEVER carries over to a later message. Each write operation needs its own explicit command in the message that asks for it.
+- Ambiguity defaults to DO NOT ACT. Stop, show the state (e.g. `git status`, `git diff`), and ask.
+- A push is a destructive publication to shared infrastructure. Treat it like `rm -rf` on a production server: never guess, never assume, never "just in case".
+
+Forbidden without an explicit command in the current message:
+
+- `git commit` (including `--amend`, `--fixup`, `--squash`), `git push` (to any remote, any branch, with or without `--force`/`--force-with-lease`/`--tags`)
+- `git merge`, `git rebase`, `git reset`, `git revert`, `git cherry-pick`, `git restore` that mutates index or worktree
+- `git checkout`/`switch` that changes branch, `git branch -d/-D/-m`, `git stash`, `git clean`, `git tag`
+- `gh pr create`, `gh pr merge`, `gh pr close`, `gh pr reopen`, `gh pr edit`, `gh pr comment`, `gh pr review --approve`/`--request-changes`
+- `gh issue create`, `gh issue close`, `gh issue reopen`, `gh issue edit`, `gh issue comment`
+- `gh release create`/`edit`/`delete`, `gh workflow run`, `gh run rerun`/`cancel`
+- `gh api` with `-X POST`/`PUT`/`PATCH`/`DELETE`, or any equivalent `curl` against the forge API
+- Any alias, script, hook, or wrapper that ultimately invokes the above
+
+Always allowed (read-only):
+
+- `git status`, `git diff`, `git log`, `git show`, `git blame`, `git fetch`, `git ls-files`, `git rev-parse`, `git for-each-ref`
+- `gh pr view`/`diff`/`checks`/`list`, `gh issue view`/`list`, `gh run view`/`list`, `gh api` GET
+- `git pull --ff-only` ONLY under the exact conditions described in "Codebase freshness" above (clean tree on main/master)
+
+Never add Co-Authored-By, co-authored-by, or any AI/agent attribution lines to git commits.
 
 # CLI tools
 
