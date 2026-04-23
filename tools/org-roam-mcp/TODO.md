@@ -24,6 +24,7 @@
 - [x] Ollama keep_alive "30m" on all embed API calls to prevent model unloading
 - [x] embed-batch consistency - :as :string + :throw-exceptions? false across all embed fns
 - [x] Graceful recovery on corrupt HNSW index - load-index catches deserialization errors, deletes corrupt file, falls back to full rebuild
+- [x] Clean JVM exit on stdin EOF - stdio loop wraps in try/finally + System/exit so non-daemon executor threads don't keep the JVM alive after the MCP client disconnects; watcher stop fn drains processor + save executors before the shutdown hook's final save-index! so they can't race on meta.edn
 - [x] 32 tests, 107 assertions
 
 ## Bugs

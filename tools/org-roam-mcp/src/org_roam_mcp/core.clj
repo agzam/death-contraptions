@@ -782,14 +782,25 @@ Returns confirmation with the node-id and file path."
                                        (util/log "ERROR saving index on shutdown:" (.getMessage e))))))))
 
     (util/log "MCP server ready, entering stdio loop")
-    ;; MCP stdio loop
-    (let [rdr (java.io.BufferedReader. *in*)]
-      (doseq [line (line-seq rdr)]
-        (when-not (str/blank? line)
-          (try
-            (let [req (json/parse-string line)]
-              (when-let [resp (handle-request req)]
-                (println (json/generate-string resp))
-                (flush)))
-            (catch Exception e
-              (util/log "ERROR parsing request:" (.getMessage e)))))))))
+    ;; MCP stdio loop. When stdin closes (parent MCP client exits) we must
+    ;; force JVM exit: watcher.clj's ScheduledExecutorService and Clojure's
+    ;; agent pool are non-daemon, so otherwise the JVM would idle forever
+    ;; while the process gets reparented to launchd (PPID=1).
+    ;; System/exit triggers the shutdown hook registered above (stops watcher,
+    ;; saves index) before tearing down the JVM.
+    (try
+      (let [rdr (java.io.BufferedReader. *in*)]
+        (doseq [line (line-seq rdr)]
+          (when-not (str/blank? line)
+            (try
+              (let [req (json/parse-string line)]
+                (when-let [resp (handle-request req)]
+                  (println (json/generate-string resp))
+                  (flush)))
+              (catch Exception e
+                (util/log "ERROR parsing request:" (.getMessage e)))))))
+      (catch Exception e
+        (util/log "ERROR in stdio loop:" (.getMessage e)))
+      (finally
+        (util/log "stdin closed, exiting")
+        (System/exit 0)))))

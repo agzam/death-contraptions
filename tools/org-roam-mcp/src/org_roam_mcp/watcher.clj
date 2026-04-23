@@ -16,52 +16,66 @@
 ;; ---------------------------------------------------------------------------
 
 (defn- debounced-processor
-  "Returns a function that debounces file events per path.
-   Calls process-fn with abs path after debounce-ms quiet period."
+  "Debounce file events per path. Returns {:process schedule-fn :stop drain-fn}.
+   The :stop fn shuts the executor down and waits for any in-flight task so
+   the shutdown hook can save-index! without racing a pending re-embed."
   [debounce-ms process-fn]
   (let [pending (atom {})
         executor (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)]
-    (fn [^String abs-path]
-      (when-let [fut (get @pending abs-path)]
-        (.cancel ^java.util.concurrent.ScheduledFuture fut false))
-      (let [fut (.schedule executor
-                  ^Runnable (fn []
-                              (swap! pending dissoc abs-path)
-                              (try
-                                (process-fn abs-path)
-                                (catch Exception e
-                                  (util/log "WARN: watcher process error for" abs-path "-" (.getMessage e)))))
-                  (long debounce-ms)
-                  java.util.concurrent.TimeUnit/MILLISECONDS)]
-        (swap! pending assoc abs-path fut)))))
+    {:process
+     (fn [^String abs-path]
+       (when-let [fut (get @pending abs-path)]
+         (.cancel ^java.util.concurrent.ScheduledFuture fut false))
+       (let [fut (.schedule executor
+                   ^Runnable (fn []
+                               (swap! pending dissoc abs-path)
+                               (try
+                                 (process-fn abs-path)
+                                 (catch Exception e
+                                   (util/log "WARN: watcher process error for" abs-path "-" (.getMessage e)))))
+                   (long debounce-ms)
+                   java.util.concurrent.TimeUnit/MILLISECONDS)]
+         (swap! pending assoc abs-path fut)))
+     :stop
+     (fn []
+       (.shutdown executor)
+       (.awaitTermination executor 5 java.util.concurrent.TimeUnit/SECONDS))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Index save debouncing
 ;; ---------------------------------------------------------------------------
 
 (defn- debounced-save
-  "Return a mark-dirty fn that coalesces index saves to at most every save-interval-ms."
+  "Coalesce index saves to at most every save-interval-ms. Returns
+   {:mark-dirty mark-fn :stop drain-fn}. :stop shuts the executor and
+   waits for any in-flight save, so no save can race the shutdown hook's
+   final save-index! on meta.edn (which spit writes non-atomically)."
   [save-interval-ms config hnsw-index-atom file-mtimes-atom]
   (let [dirty (atom false)
         executor (java.util.concurrent.Executors/newSingleThreadScheduledExecutor)
         pending (atom nil)]
-    (fn mark-dirty []
-      (reset! dirty true)
-      (when-let [fut @pending] (.cancel ^java.util.concurrent.ScheduledFuture fut false))
-      (reset! pending
-              (.schedule executor
-                ^Runnable (fn []
-                            (when @dirty
-                              (try
-                                (idx/save-index! @hnsw-index-atom (:index-dir config)
-                                                 @file-mtimes-atom
-                                                 (.size ^com.github.jelmerk.hnswlib.core.hnsw.HnswIndex @hnsw-index-atom)
-                                                 (:model config) (get-in config [:hnsw :dimensions]))
-                                (reset! dirty false)
-                                (catch Exception e
-                                  (util/log "WARN: debounced save failed:" (.getMessage e))))))
-                (long save-interval-ms)
-                java.util.concurrent.TimeUnit/MILLISECONDS)))))
+    {:mark-dirty
+     (fn mark-dirty []
+       (reset! dirty true)
+       (when-let [fut @pending] (.cancel ^java.util.concurrent.ScheduledFuture fut false))
+       (reset! pending
+               (.schedule executor
+                 ^Runnable (fn []
+                             (when @dirty
+                               (try
+                                 (idx/save-index! @hnsw-index-atom (:index-dir config)
+                                                  @file-mtimes-atom
+                                                  (.size ^com.github.jelmerk.hnswlib.core.hnsw.HnswIndex @hnsw-index-atom)
+                                                  (:model config) (get-in config [:hnsw :dimensions]))
+                                 (reset! dirty false)
+                                 (catch Exception e
+                                   (util/log "WARN: debounced save failed:" (.getMessage e))))))
+                 (long save-interval-ms)
+                 java.util.concurrent.TimeUnit/MILLISECONDS)))
+     :stop
+     (fn []
+       (.shutdown executor)
+       (.awaitTermination executor 5 java.util.concurrent.TimeUnit/SECONDS))}))
 
 ;; ---------------------------------------------------------------------------
 ;; Exclude filtering
@@ -132,16 +146,19 @@
 
 (defn start!
   "Start watching the org directory for changes using native OS events.
-   Returns a function to stop the watcher."
+   Returns a function to stop the watcher. The stop fn drains the processor
+   and save executors in order so the shutdown hook's save-index! runs alone."
   [config hnsw-index-atom file-mtimes-atom]
   (let [org-dir (util/expand-home (:org-dir config))
         excludes (or (:exclude config) [])
         debounce-ms (or (:watch-debounce-ms config) 2000)
-        save-fn (debounced-save 30000 config hnsw-index-atom file-mtimes-atom)
-        on-change (debounced-processor
-                   debounce-ms
-                   (fn [abs-path]
-                     (process-file-change! config hnsw-index-atom file-mtimes-atom save-fn abs-path)))
+        save-ctl (debounced-save 30000 config hnsw-index-atom file-mtimes-atom)
+        mark-dirty (:mark-dirty save-ctl)
+        processor-ctl (debounced-processor
+                       debounce-ms
+                       (fn [abs-path]
+                         (process-file-change! config hnsw-index-atom file-mtimes-atom mark-dirty abs-path)))
+        on-change (:process processor-ctl)
         watcher (-> (DirectoryWatcher/builder)
                     (.path (Paths/get org-dir (into-array String [])))
                     (.listener (reify io.methvin.watcher.DirectoryChangeListener
@@ -155,7 +172,11 @@
                     (.build))]
     (.watchAsync watcher)
     (util/log "File watcher started on" org-dir "(native events)")
-    ;; Return stop function
+    ;; Return stop function. Order matters: stop the event source first, let
+    ;; any in-flight file processing finish (it may call mark-dirty), then
+    ;; drain the save executor so the shutdown hook can save-index! alone.
     (fn []
       (.close watcher)
+      ((:stop processor-ctl))
+      ((:stop save-ctl))
       (util/log "File watcher stopped"))))

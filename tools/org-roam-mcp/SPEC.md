@@ -417,8 +417,13 @@ The watcher is configured via `DirectoryWatcher.builder` with a single
 - Index save debouncing: a separate `debounced-save` function coalesces
   saves to at most every 30s during bulk watcher updates, avoiding
   excessive disk I/O.
-- Graceful shutdown: `start!` returns a stop function that calls
-  `.close` on the DirectoryWatcher.
+- Graceful shutdown: `start!` returns a stop function that closes the
+  DirectoryWatcher, then drains the processor and save executors in
+  that order. Draining means `.shutdown` + `.awaitTermination` (5s), so
+  any pending re-embed or save completes before the stop fn returns.
+  This lets the JVM shutdown hook call `save-index!` without racing a
+  background debounced save (which would corrupt `meta.edn`, since
+  `spit` is not atomic).
 
 ### 8.2 Event handling
 
@@ -931,7 +936,12 @@ src/org_roam_mcp/
 - Initialize index (load or build)
 - Start file watcher
 - Enter stdio loop: read JSON lines, dispatch to tools, write responses
-- Graceful shutdown: save index on exit (shutdown hook)
+- Graceful shutdown: when stdin closes (parent MCP client exits), the
+  stdio loop's `finally` calls `(System/exit 0)`. That forces JVM
+  termination regardless of non-daemon threads (scheduled executors in
+  watcher.clj, Clojure agent pool) and runs the shutdown hook, which
+  saves the index. Without this, the JVM idles forever after stdin EOF
+  and accumulates one orphaned process per ECA session.
 
 ### Startup sequence
 1. Load config.edn
