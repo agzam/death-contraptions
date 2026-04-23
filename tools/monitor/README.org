@@ -1,0 +1,317 @@
+#+title: monitor
+
+Conditional stream watcher. Spawns a long-running source command, filters its stdout per line, and emits only matches. Designed to run as an ECA background task so the LLM pays tokens only when a match fires, never on the raw firehose.
+
+Not an MCP server - a plain Babashka script invoked via ~eca__shell_command background=...~ and peeked via ~eca__bg_job read_output~.
+
+* Usage
+
+#+begin_src shell
+monitor.bb --source <shell-cmd>
+           [(--jq <expr> | --regex <pat> | --grep <str>)]
+           [--live] [--digest-interval <sec>] [--digest-top <n>]
+           [--max-matches <n>] [--max-runtime <sec>]
+#+end_src
+
+|                         |            | <70>                                                                                                                                                                      |
+| Flag                    | Required   | Purpose                                                                                                                                                                   |
+|-------------------------+------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| ~--source <cmd>~          | yes        | Long-running producer. Runs under ~sh -c <cmd>~; monitor shutdown destroys the whole descendant tree (no orphan children).                                                  |
+| ~--jq <expr>~             | one filter | jq expression per line. Match = jq stdout is non-empty and not literal ~null~; the jq output is emitted. Selection and reshape in one expression.                           |
+| ~--regex <pattern>~       | one filter | Java regex on the raw line. Matching line is emitted verbatim.                                                                                                            |
+| ~--grep <substring>~      | one filter | Literal substring match. Matching line is emitted verbatim.                                                                                                               |
+| ~--live~                  | no         | Push each match into the active ECA chat via ~emacsclient~ so the agent wakes per match. Requires an Emacs server and ~emacsclient~ on PATH.                                  |
+| ~--digest-interval <sec>~ | no         | Digest mode. Buffer lines and emit a deduped top-N histogram every N seconds instead of per-match output. Filter becomes optional (no filter = digest every source line). |
+| ~--digest-top <n>~        | no         | Cap entries per digest (default 20).                                                                                                                                      |
+| ~--max-matches <n>~       | no         | Exit 0 after N matches. Default: 1 without ~--live~/digest, unlimited with either.                                                                                        |
+| ~--max-runtime <sec>~     | no         | Hard ceiling on total runtime in seconds. Logs a reason line to stderr and exits 0 when the budget elapses.                                                               |
+
+A filter (~--jq~/~--regex~/~--grep~) is required unless ~--digest-interval~ is set. Diagnostics go to stderr; stdout is match-only (or digest-only in digest mode).
+
+* Three modes
+
+The tool has three distinct shapes:
+
+- Stop-on-match (default). Filter lines, exit on first match. Rely on the user's next prompt to surface the hit via ECA's queued "Background job completed" message. Good for "wait once for X, report it next time I speak".
+- Live (~--live~). Filter lines, push each match into the active ECA chat through ~emacsclient~, which ECA delivers as a new user prompt and wakes the agent immediately. Equivalent to Claude Code's Monitor tool plumbed through Emacs. Good for "tell me the moment any X happens". Requires Emacs running as a server and ~emacsclient~ on PATH.
+- Digest (~--digest-interval SEC~). Optionally filter (or not - catches everything), buffer lines into a frequency map, emit a deduped top-N histogram every ~SEC~ seconds. Good for "give me a periodic pulse of what the source is doing without the firehose". Combines with ~--live~ (the digest becomes the pushed prompt). Lines are normalized before bucketing (see next section) so event-class recurrence folds into counts instead of producing unique rows.
+
+* Architecture
+
+Restatement because it trips people up: ~monitor.bb~ is not an MCP server. It has no JSON-RPC, no ~tools/list~, no registration in ~setup.bb~. It is a plain Babashka script. The agent reaches it through the generic ~eca__shell_command~ with a ~background~ label, the same way it would run any other long-running shell command. The Skill at ~skills/monitor/SKILL.md~ is the other half: agent-facing instructions that teach the agent when and how to use the script, loaded through ECA's skills registry.
+
+** Component map (live mode)
+
+#+begin_example
+                     ┌──────────────────────────────────────────────┐
+                     │                   YOU                        │
+                     └────────────┬─────────────────────────▲───────┘
+                                  │ prompt                  │ agent reply
+                                  ▼                         │
+┌────────────────────────────────────────────────────────────────────┐
+│                       ECA (Emacs chat)                             │
+│   - renders chat                                                   │
+│   - dispatches tool calls                                          │
+│   - Skill registry (~/.config/eca/skills/ -> repo skills/)         │
+│   - exposes eca-chat-send-prompt as an elisp function              │
+└──────────┬─────────────────────▲──────────────────────▲────────────┘
+           │ eca__shell_command  │ tool result          │ JSONRPC chat/prompt
+           │ (background=...)    │ (job-N started)      │ (synthetic user turn)
+           ▼                     │                      │
+┌──────────────────────────────────────────────┐        │
+│                   AGENT (LLM)                │        │
+│   1. loads skills/monitor/SKILL.md           │        │
+│   2. picks mode/flags per user intent        │        │
+│   3. fires eca__shell_command                │        │
+│   4. on match-turn: calls OTHER MCPs         │        │
+│      (k8s, splunk, slack) to investigate     │        │
+└──────────┬──────────────────────────┬────────┘        │
+           │ eca__shell_command bg    │ normal tool calls│
+           ▼                          ▼                  │
+┌─────────────────────────────┐  ┌────────────────────┐  │
+│   monitor.bb (bb script)    │  │  k8s / splunk /    │  │
+│   - sh -c <source cmd>      │  │  slack MCPs        │  │
+│   - regex/jq/grep filter    │  │  (pull, follow-up  │  │
+│   - digest buckets+normalize│  │   queries)         │  │
+│   - shutdown hook           │  └────────────────────┘  │
+└──┬──────────────────┬───────┘                          │
+   │ spawns           │ on match (live mode):            │
+   │                  │ emacsclient --eval               │
+   ▼                  │ '(eca-chat-send-prompt           │
+┌──────────────────┐  │   "monitor: ...")'               │
+│  SOURCE child    │  └────────────────► emacsclient ────┘
+│  kubectl -w      │                       │
+│  fswatch         │                       │
+│  stern           │                       ▼
+│  journalctl -f   │                    Emacs
+│  ...             │
+└──────────────────┘
+#+end_example
+
+** Timeline of one live-mode match
+
+#+begin_example
+t=0    You: "alert me when a new .png lands on Desktop"
+t=0+   Agent calls eca__shell_command:
+         command   = /abs/path/monitor.bb --source "fswatch -x ~/Desktop"
+                     --regex '\.png' --live --max-runtime 600
+         background= fswatch-desktop
+       -> Agent's turn ends.
+
+t=S    You take a screenshot.
+t=S+   fswatch emits "/Users/ryl/Desktop/foo.png Created IsFile Updated".
+t=S+   monitor.bb regex matches.
+t=S+   monitor.bb forks
+         emacsclient --eval '(eca-chat-send-prompt "monitor: ...")'
+       as a Java future (fire-and-forget).
+t=S+   emacsclient talks to Emacs, Emacs calls eca-chat-send-prompt.
+t=S+   ECA sends a JSONRPC chat/prompt request to the ECA server with the
+       synthesized text.
+t=S+   ECA surfaces it in the chat buffer as a new user turn:
+         "monitor: /Users/ryl/Desktop/foo.png Created IsFile Updated"
+t=S++  Agent wakes, sees the synthetic prompt.
+       May call other MCPs (k8s-describe, splunk-search, etc.) to
+       investigate. Replies to you.
+
+... monitor.bb is STILL running, ready for the next match ...
+
+t=600  --max-runtime hits -> monitor.bb exits 0.
+       Shutdown hook destroys source tree (fswatch dies).
+       ECA server queues a bg-job completion notification that piggybacks
+       on your NEXT user turn. Does NOT wake the agent on its own.
+#+end_example
+
+Digest mode replaces steps "monitor.bb regex matches -> fork emacsclient" with "monitor.bb adds to bucket; every ~--digest-interval~ seconds the ticker flushes one aggregated histogram as the push".
+
+** Where each piece runs and when
+
+- Skill content lives in this repo at ~skills/monitor/SKILL.md~. ~setup.bb~ symlinks ~~/.config/eca/skills/~ -> ~<repo>/skills/~ so any session picks it up at start. Agent-facing instructions, not executable.
+- ~monitor.bb~ runs as a child process of the ECA server (spawned by the ECA ~shell_command~ handler). Its lifetime is the bg job's lifetime: from ~eca__shell_command~ start to either natural exit, ~--max-runtime~, ~--max-matches~ cap, or ~eca__bg_job kill~.
+- The SOURCE subprocess (~kubectl~, ~fswatch~, ~stern~, etc.) runs as a child of ~monitor.bb~ via ~sh -c~. ~monitor.bb~'s JVM shutdown hook calls ~destroy-tree!~ to signal the whole descendant tree, so nothing orphans.
+- The push path (live mode) goes ~monitor.bb~ -> ~emacsclient~ -> Emacs -> ECA client -> ECA server. If Emacs is not running with a server, ~--live~ fails - ~monitor.bb~ logs the emacsclient error to stderr but keeps matching; the match still lands in the bg-job output buffer for later peek.
+
+** Interaction with other MCPs
+
+Important detail: ~monitor.bb~ does NOT call any MCP. It shells out to ~kubectl~ / ~fswatch~ / ~stern~ directly. The k8s MCP at ~tools/k8s/server.bb~ is pull-only and wraps the same CLIs; using it from ~monitor.bb~ would add latency and round-trips for nothing.
+
+The k8s/splunk/slack MCPs come into play on the AGENT side, after a match wakes it up:
+
+1. Monitor pushes a match prompt into the chat.
+2. Agent sees e.g. "monitor: pod X entered CrashLoopBackOff".
+3. Agent calls ~k8s-describe~, ~k8s-pod-logs~, or ~k8s-events~ on that pod to gather context.
+4. Agent reports root-cause analysis back to you.
+
+So the division of labor is: ~monitor.bb~ does detection and delivery; the MCPs do follow-up investigation. The agent is the orchestrator between them.
+
+* Digest normalization
+
+Raw identity dedup is nearly useless on Kubernetes event streams because every line embeds instance-identifying tokens (pod hash suffix, cronjob iteration number, age column) that change even when the event class is the same. ~monitor.bb~ collapses three patterns before bucketing:
+
+| Pattern                           | Replaced with |
+|-----------------------------------+---------------|
+| age column: ~\d+[smhdw]~            | ~<AGE>~         |
+| long digit run: ~\d{5,}~            | ~<N>~           |
+| hash-like suffix: ~-[a-z0-9]{5,10}~ | ~-<ID>~         |
+
+So ~pod/foo-29616085-ltgtv~ and ~pod/foo-29616086-585r4~ bucket together under ~pod/foo-<N>-<ID>~, and the displayed exemplar is the first raw line seen per class. Header reports ~N lines, M classes~ to make the compression visible.
+
+Single-digit ordinals (e.g. StatefulSet pod ~postgresql-1~ vs ~postgresql-0~) are deliberately preserved because they usually carry meaning.
+
+* Usage pattern with ECA
+
+1. Start the watcher as a background job with a descriptive label:
+
+   #+begin_src text
+   eca__shell_command
+     command   = /abs/path/tools/monitor/monitor.bb --source '...' --jq '...'
+     background = k8s-warnings
+   #+end_src
+
+   Returns a job id (e.g. ~job-1~).
+
+2. Peek on your own cadence - empty output means no matches, tiny token cost:
+
+   #+begin_src text
+   eca__bg_job action=read_output job_id=job-1
+   #+end_src
+
+3. Stop when done:
+
+   #+begin_src text
+   eca__bg_job action=kill job_id=job-1
+   #+end_src
+
+* Recipes
+
+** k8s Warning events
+
+#+begin_src shell
+monitor.bb \
+  --source "kubectl get events -A -w -o json" \
+  --jq 'select(.type == "Warning") | {ns: .involvedObject.namespace, kind: .involvedObject.kind, name: .involvedObject.name, reason: .reason, msg: .message}'
+#+end_src
+
+** Pods entering CrashLoopBackOff
+
+#+begin_src shell
+monitor.bb \
+  --source "kubectl get pods -A -w -o json" \
+  --jq 'select((.status.containerStatuses // [])[]?.state.waiting.reason == "CrashLoopBackOff") | {ns: .metadata.namespace, pod: .metadata.name, container: .status.containerStatuses[0].name}'
+#+end_src
+
+** Text log tail with regex
+
+#+begin_src shell
+monitor.bb \
+  --source "stern app -o raw --no-follow=false" \
+  --regex "ERROR .*timeout"
+#+end_src
+
+** Simple substring watch
+
+#+begin_src shell
+monitor.bb \
+  --source "journalctl -f -u my-service" \
+  --grep "OOMKilled"
+#+end_src
+
+** Bounded ad-hoc watch with --max-runtime
+
+For watches that should self-terminate (forgotten monitors cannot linger), pass ~--max-runtime~:
+
+#+begin_src shell
+monitor.bb \
+  --source "kubectl get events -A --watch-only" \
+  --regex "BackOff|CrashLoop|OOMKilled" \
+  --max-runtime 600
+#+end_src
+
+The monitor exits 0 after 600 seconds with a stderr reason line and destroys the source tree.
+
+** Live-stream screenshots into the ECA chat
+
+#+begin_src shell
+monitor.bb \
+  --source "fswatch -x ~/Desktop" \
+  --regex '\.(png|jpg|jpeg|pdf)' \
+  --live \
+  --max-runtime 600
+#+end_src
+
+Every screenshot or image dropped onto Desktop becomes a new user prompt (~monitor: /Users/.../foo.png Created IsFile Updated~) in the active ECA chat. Kill via ~eca__bg_job kill~ or let ~--max-runtime~ stop it.
+
+Note: many sources (including ~fswatch~) emit multiple events for a single logical change - e.g. ~Created IsFile~ immediately followed by ~Created IsFile Updated~ when the OS flushes the write. Live mode pushes each one; ECA may coalesce pushes that arrive while the agent is already responding. A future ~--cooldown SEC~ flag would dedupe identical emissions within a window; it is not built yet.
+
+** Periodic cluster digest (every 2 minutes)
+
+#+begin_src shell
+monitor.bb \
+  --source "kubectl --kubeconfig ~/.kube/vohi get events -A --watch-only" \
+  --digest-interval 120 \
+  --digest-top 15 \
+  --live \
+  --max-runtime 3600
+#+end_src
+
+No filter: every event line gets counted. Every 2 minutes the monitor emits a digest like
+
+#+begin_example
+monitor digest (120s window, 428 lines, 31 distinct):
+  214x Warning PolicyViolation deployment/argocd-repo-server ...
+   58x Normal  Scheduled pod/kyverno-cleanup-ephemeral-reports-... ...
+    3x Warning FailedScheduling pod/... 0/5 nodes are available ...
+    ...
+#+end_example
+
+and pushes it into the ECA chat (because of ~--live~). 30 agent turns per hour max, each with the top activity compressed into ~15 lines no matter how noisy the raw stream was. Kill or let ~--max-runtime~ stop it.
+
+** Filtered digest
+
+Filter and digest compose. Filter first, then digest the survivors:
+
+#+begin_src shell
+monitor.bb \
+  --source "kubectl get events -A --watch-only" \
+  --regex "Warning" \
+  --digest-interval 120 \
+  --max-runtime 3600
+#+end_src
+
+Counts only ~Warning~ events in the digest, ignoring ~Normal~ ones.
+
+* Buffering caveat
+
+Many commands line-buffer on a tty but block-buffer when their stdout is a pipe, so matches can sit in a 4-64KB buffer for minutes. If a source appears silent, wrap it in ~stdbuf -oL~ (Linux) or ~gstdbuf -oL~ (macOS, ~brew install coreutils~):
+
+#+begin_src shell
+monitor.bb --source "gstdbuf -oL my-noisy-cmd | jq -c --unbuffered '.'" --regex "..."
+#+end_src
+
+Kubernetes streaming commands (~kubectl -w -o json~, ~stern~) are already line-buffered and do not need this.
+
+* ~--jq~ notes
+
+- Selection and reshape share one expression. ~select(cond) | {...}~ both filters and projects.
+- Input must be one JSON value per line (ND-JSON). ~kubectl -o json --watch~ produces that; ~kubectl -o json~ without ~--watch~ produces a single outer document, which does not stream.
+- A literal ~null~ output is treated as no-match.
+- Forks ~jq~ once per input line. Plenty for event streams; for very chatty log tails prefer ~--regex~.
+
+* Non-goals for now
+
+Deliberately omitted to keep the surface small. Add only when real usage proves they are needed:
+
+- ~--cooldown SEC~ - dedupe identical emissions in live/pattern mode (notable for ~fswatch~ which double-fires on writes).
+- ~--digest-mode novel|tail~ - alternative digest shapes: only new lines never seen before, or raw last-N-lines sample.
+- ~--digest-normalize~ toggle - currently always on in digest mode. Add a way to opt out if a source's native identity is actually what the user wants to bucket on.
+- ~--digest-source-snapshot~ - re-run a snapshot-style source on each tick and diff against previous snapshot (for sources that are not true streams).
+- ~--label STR~ - prefix every emission with a tag so multiple concurrent monitors are distinguishable in the chat.
+- ~--idle-match-timeout SEC~ - exit if no match has fired in N seconds (distinct from ~--max-runtime~; counter resets on each match).
+- ~--source-stall-timeout SEC~ - exit if the source has written no line (matched or not) in N seconds. Detects stuck/dead sources.
+- ~--on-match-elisp <template>~ - generic elisp injection per match (more flexible than the hardcoded ~eca-chat-send-prompt~ wrapper that ~--live~ uses).
+- Persistent ~jq~ process to amortize fork cost on high-throughput streams.
+
+* Prerequisites
+
+- Babashka (~bb~).
+- ~jq~ on PATH when using ~--jq~ (preflight fails fast if missing).
+- ~gstdbuf~ via ~coreutils~ on macOS for block-buffered sources; ~stdbuf~ on Linux.
