@@ -32,6 +32,18 @@
                 "/Claude/")
     nil))
 
+(defn- copilot-config-dir
+  "Where GitHub Copilot CLI reads its user config.
+  $COPILOT_HOME wins if set; otherwise $HOME/.copilot. Returns nil if
+  $HOME is also missing so the Copilot block is skipped entirely."
+  []
+  (let [override (System/getenv "COPILOT_HOME")
+        home (System/getenv "HOME")]
+    (cond
+      (and override (not (str/blank? override))) override
+      home (str home "/.copilot")
+      :else nil)))
+
 ;; Server registry: name -> {:command, :platform}
 (def servers
   {"elisp-eval" {:command "elisp-eval/server.bb"
@@ -315,6 +327,35 @@ end tell"
               updated (assoc existing :mcpServers server-entries)]
           (spit claude-json (json/generate-string updated {:pretty true}))
           (println (str "  wrote: " claude-json " (mcpServers)")))))
+
+    ;; GitHub Copilot CLI: user-scope personal instructions, skills symlink,
+    ;; and mcpServers merged into ~/.copilot/mcp-config.json (preserving
+    ;; servers a user added via /mcp add). Leaves ~/.copilot/config.json
+    ;; alone so auth state and trusted_folders stay intact.
+    (when-let [copilot-dir (copilot-config-dir)]
+      (ensure-dir copilot-dir)
+      (create-symlink (str copilot-dir "/copilot-instructions.md")
+                      (str repo-dir "/AGENTS.md"))
+      (println (str "  symlink: " copilot-dir "/copilot-instructions.md -> "
+                    repo-dir "/AGENTS.md"))
+      (create-symlink (str copilot-dir "/skills") skills-dir)
+      (println (str "  symlink: " copilot-dir "/skills -> " skills-dir))
+      (let [mcp-path (str copilot-dir "/mcp-config.json")
+            ;; Copilot CLI's zod schema makes args required (must be an
+            ;; array) and rejects type "local"; the stdio branch just
+            ;; needs {command, args}. String keys throughout so merge
+            ;; does not see "k8s" and :k8s as distinct and duplicate.
+            copilot-entries (update-vals
+                             server-entries
+                             (fn [v] {"command" (:command v) "args" []}))
+            existing (if (.exists (io/file mcp-path))
+                       (json/parse-string (slurp mcp-path))
+                       {})
+            existing-servers (get existing "mcpServers" {})
+            merged-servers (merge existing-servers copilot-entries)
+            updated (assoc existing "mcpServers" merged-servers)]
+        (spit mcp-path (json/generate-string updated {:pretty true}))
+        (println (str "  wrote: " mcp-path " (mcpServers)"))))
 
     ;; Symlinks that point back to the real AGENTS.md in the repo. The
     ;; canonical location is the repo (tracked via agents-base.md plus
