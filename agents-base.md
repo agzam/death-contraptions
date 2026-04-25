@@ -95,6 +95,8 @@ For scripted writes (add a comment, edit a field, etc.), `jira comment` / `jira 
 
 - Functions and methods must have properly formatted, brief, simple docstrings explaining the reasoning - not retelling (already codified) functionality.
 
+- After modifying any `.el` file in the workspace, ALWAYS `load-file` it into the running Emacs session via `elisp-eval`. Do not ask, do not inform, just do it as part of completing the edit. If multiple `.el` files were changed, load each one. This is not optional.
+
 - All code should be properly linted. After done with all the edits in every relevant file, apply linting tools:
 
     - Clojure: clj-kondo
@@ -181,3 +183,4 @@ Pause and ask if:
 - you are choosing between trade-offs the user should approve
 
 Do not fabricate certainty to stay moving.
+

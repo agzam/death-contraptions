@@ -261,13 +261,12 @@ end tell"
   (println "  skipped: claude.ai Personal preferences auto-push not implemented here; paste ~/.config/eca/AGENTS.md into Settings -> Personal preferences manually"))
 
 (defn -main
-  "Propagate AGENTS.md, MCP servers, and skills to every consumer so a single
-  edit of agents-base.md flows everywhere on re-run. Writes ECA's
-  config.json/AGENTS.md, merges mcpServers into ~/.claude.json (Claude Code
-  CLI), symlinks Claude Code CLI's CLAUDE.md and skills, writes Claude
-  Desktop's claude_desktop_config.json (macOS), and pushes AGENTS.md into
-  claude.ai's server-side Personal preferences via an already-open browser
-  tab so Claude Desktop chat picks it up too."
+  "Propagate agents-base.md + :agents-extra to every consumer as copied
+  files so a single re-run keeps all in sync. Writes ECA config.json and
+  AGENTS.md, Claude Code CLI CLAUDE.md, Copilot copilot-instructions.md,
+  Claude Desktop config, and pushes into claude.ai Personal preferences.
+  Cleans stale AGENTS.md/CLAUDE.md from the repo dir so only
+  agents-base.md lives here."
   []
   (println "Setting up death-contraptions...")
   (println (str "  repo: " repo-dir))
@@ -289,15 +288,13 @@ end tell"
       (println (str "  wrote: " config-path))
       (println (str "  servers: " (str/join ", " (keys server-entries)))))
 
-    ;; Write AGENTS.md as a real file in the repo; ~/.config/eca/AGENTS.md
-    ;; becomes a symlink to it below. Delete any pre-existing path (symlink
-    ;; or file) first so `spit` doesn't follow an old symlink and write to
-    ;; the wrong target.
-    (let [agents-path (str repo-dir "/AGENTS.md")
-          p (java.nio.file.Paths/get agents-path (into-array String []))]
-      (java.nio.file.Files/deleteIfExists p)
-      (spit agents-path agents-content)
-      (println (str "  wrote: " agents-path)))
+    ;; Remove stale AGENTS.md / CLAUDE.md from repo dir if left over from
+    ;; a previous setup run.  The generated content now lives only in the
+    ;; consumer directories; the repo should only contain agents-base.md.
+    (doseq [f ["AGENTS.md" "CLAUDE.md"]]
+      (let [p (java.nio.file.Paths/get (str repo-dir "/" f) (into-array String []))]
+        (when (java.nio.file.Files/deleteIfExists p)
+          (println (str "  removed stale: " repo-dir "/" f)))))
 
     ;; Claude Desktop local MCP config (platform-specific path).
     (when-let [dir (claude-desktop-config-dir)]
@@ -318,8 +315,11 @@ end tell"
     (let [claude-dir (str (System/getenv "HOME") "/.claude")
           claude-json (str (System/getenv "HOME") "/.claude.json")]
       (ensure-dir claude-dir)
-      (create-symlink (str claude-dir "/CLAUDE.md") (str repo-dir "/AGENTS.md"))
-      (println (str "  symlink: ~/.claude/CLAUDE.md -> " repo-dir "/AGENTS.md"))
+      (let [dst (str claude-dir "/CLAUDE.md")
+            p (java.nio.file.Paths/get dst (into-array String []))]
+        (java.nio.file.Files/deleteIfExists p)
+        (spit dst agents-content)
+        (println (str "  wrote: " dst)))
       (create-symlink (str claude-dir "/skills") skills-dir)
       (println (str "  symlink: ~/.claude/skills -> " skills-dir))
       (when (.exists (io/file claude-json))
@@ -334,10 +334,11 @@ end tell"
     ;; alone so auth state and trusted_folders stay intact.
     (when-let [copilot-dir (copilot-config-dir)]
       (ensure-dir copilot-dir)
-      (create-symlink (str copilot-dir "/copilot-instructions.md")
-                      (str repo-dir "/AGENTS.md"))
-      (println (str "  symlink: " copilot-dir "/copilot-instructions.md -> "
-                    repo-dir "/AGENTS.md"))
+      (let [dst (str copilot-dir "/copilot-instructions.md")
+            p (java.nio.file.Paths/get dst (into-array String []))]
+        (java.nio.file.Files/deleteIfExists p)
+        (spit dst agents-content)
+        (println (str "  wrote: " dst)))
       (create-symlink (str copilot-dir "/skills") skills-dir)
       (println (str "  symlink: " copilot-dir "/skills -> " skills-dir))
       (let [mcp-path (str copilot-dir "/mcp-config.json")
@@ -357,14 +358,14 @@ end tell"
         (spit mcp-path (json/generate-string updated {:pretty true}))
         (println (str "  wrote: " mcp-path " (mcpServers)"))))
 
-    ;; Symlinks that point back to the real AGENTS.md in the repo. The
-    ;; canonical location is the repo (tracked via agents-base.md plus
-    ;; local extras, output path gitignored); everywhere else is a symlink
-    ;; so a single setup.bb run keeps every consumer in sync.
-    (create-symlink (str eca-dir "/AGENTS.md") (str repo-dir "/AGENTS.md"))
-    (println (str "  symlink: ~/.config/eca/AGENTS.md -> " repo-dir "/AGENTS.md"))
-    (create-symlink (str repo-dir "/CLAUDE.md") (str repo-dir "/AGENTS.md"))
-    (println (str "  symlink: " repo-dir "/CLAUDE.md -> " repo-dir "/AGENTS.md"))
+    ;; Write generated AGENTS.md into ~/.config/eca/ as a real file.
+    ;; The canonical source is agents-base.md + :agents-extra; every
+    ;; consumer gets a copy so a single setup.bb run keeps them in sync.
+    (let [dst (str eca-dir "/AGENTS.md")
+          p (java.nio.file.Paths/get dst (into-array String []))]
+      (java.nio.file.Files/deleteIfExists p)
+      (spit dst agents-content)
+      (println (str "  wrote: " dst)))
 
     ;; Symlinks
     (create-symlink (str eca-dir "/tools") tools-dir)
