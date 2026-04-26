@@ -13,13 +13,16 @@
 
  :servers
  {:slack {:default-host "your-workspace.slack.com"}
-  :splunk {:host "your-instance.splunkcloud.com"}
-  :org-roam-mcp {:ollama-url "http://localhost:11434"
+  :splunk {:disabled? true
+           :host "your-instance.splunkcloud.com"}
+  :org-roam-mcp {:disabled? true
+                 :ollama-url "http://localhost:11434"
                  :ssh-tunnel {:enabled false
                               :host "your-ollama-host"
                               :remote-port 11434
                               :local-port 11434}}
-  :qlik-kb {:qcs-api-token "your_qcs_api_token"}}
+  :qlik-kb {:disabled? true
+            :qcs-api-token "your_qcs_api_token"}}
 
  ;; Extra content appended to AGENTS.md (optional)
  ;; :agents-extra "..."

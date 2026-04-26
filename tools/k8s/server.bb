@@ -429,7 +429,7 @@
 
 (def tools
   [{:name "k8s-contexts"
-    :description "List available Kubernetes contexts from kubeconfig. Use to discover clusters."
+    :description "List available kubeconfig contexts."
     :inputSchema
     {:type "object"
      :properties {:kubeconfig {:type "string" :description "Path to kubeconfig file (default: ~/.kube/config)"}}}}
@@ -449,7 +449,7 @@
      :required ["kind"]}}
 
    {:name "k8s-resources-get"
-    :description "Get a specific Kubernetes resource by name. Returns cleaned JSON. Secrets are redacted."
+    :description "Get a resource by name. Returns cleaned JSON. Secrets redacted."
     :inputSchema
     {:type "object"
      :properties {:kind       {:type "string" :description "Resource kind"}
@@ -460,7 +460,7 @@
      :required ["kind" "name"]}}
 
    {:name "k8s-resources-apply"
-    :description "Create or update a Kubernetes resource from YAML/JSON manifest (kubectl apply)."
+    :description "Apply a YAML/JSON manifest (kubectl apply)."
     :inputSchema
     {:type "object"
      :properties {:resource   {:type "string" :description "YAML or JSON manifest to apply"}
@@ -470,7 +470,7 @@
      :required ["resource"]}}
 
    {:name "k8s-resources-delete"
-    :description "Delete a Kubernetes resource. Use with caution."
+    :description "Delete a resource. Use with caution."
     :inputSchema
     {:type "object"
      :properties {:kind       {:type "string" :description "Resource kind"}
@@ -481,7 +481,7 @@
      :required ["kind" "name"]}}
 
    {:name "k8s-pod-logs"
-    :description "Get logs from pods matching a query. Uses stern for multi-pod regex matching when available, falls back to kubectl logs. Returns last N lines."
+    :description "Get pod logs by name regex. Uses stern if available, else kubectl logs."
     :inputSchema
     {:type "object"
      :properties {:query      {:type "string" :description "Pod name regex or resource/name (e.g. 'nginx', 'deploy/myapp')"}
@@ -496,7 +496,7 @@
      :required ["query"]}}
 
    {:name "k8s-pod-exec"
-    :description "Execute a command in a running pod container."
+    :description "Exec a command in a pod container."
     :inputSchema
     {:type "object"
      :properties {:name       {:type "string" :description "Pod name"}
@@ -508,7 +508,7 @@
      :required ["name" "command"]}}
 
    {:name "k8s-events"
-    :description "List Kubernetes events. Shows warnings, errors, recent activity. Can filter by resource."
+    :description "List cluster events. Filterable by resource kind/name."
     :inputSchema
     {:type "object"
      :properties {:namespace      {:type "string" :description "Namespace"}
@@ -519,7 +519,7 @@
                   :context        {:type "string" :description "Kubeconfig context to use"}}}}
 
    {:name "k8s-describe"
-    :description "Describe a Kubernetes resource in human-readable format with events (kubectl describe)."
+    :description "Describe a resource with events (kubectl describe)."
     :inputSchema
     {:type "object"
      :properties {:kind       {:type "string" :description "Resource kind"}
@@ -530,14 +530,14 @@
      :required ["kind" "name"]}}
 
    {:name "k8s-api-resources"
-    :description "List available API resource types in the cluster, including CRDs. For discovering what resources exist."
+    :description "List API resource types in the cluster, including CRDs."
     :inputSchema
     {:type "object"
      :properties {:kubeconfig {:type "string" :description "Path to kubeconfig file"}
                   :context    {:type "string" :description "Kubeconfig context to use"}}}}
 
    {:name "k8s-helm-list"
-    :description "List Helm releases. Shows deployed charts, versions, status."
+    :description "List Helm releases with chart versions and status."
     :inputSchema
     {:type "object"
      :properties {:namespace      {:type "string" :description "Namespace (default: all)"}
@@ -546,7 +546,7 @@
                   :context        {:type "string" :description "Kubeconfig context to use"}}}}
 
    {:name "k8s-helm-status"
-    :description "Get Helm release status including chart version, app version, deployment status."
+    :description "Get Helm release status and versions."
     :inputSchema
     {:type "object"
      :properties {:name       {:type "string" :description "Release name"}
@@ -556,7 +556,7 @@
      :required ["name"]}}
 
    {:name "k8s-resources-watch"
-    :description "Watch resources for changes. First call captures a snapshot; subsequent calls return only additions, removals, and modifications since last check. For monitoring pod restarts, rollouts, etc."
+    :description "Watch resources for changes. First call snapshots; subsequent calls return diffs."
     :inputSchema
     {:type "object"
      :properties {:kind           {:type "string" :description "Resource kind (e.g. pods, deployments)"}

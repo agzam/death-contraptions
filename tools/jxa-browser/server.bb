@@ -83,11 +83,11 @@
 
 (def tools
   [{:name "browser-list-tabs"
-    :description "List all open browser tabs across all windows. Returns JSON array with each tab's windowIndex, tabIndex, url, title, and whether it is the active tab."
+    :description "List all open browser tabs. Returns windowIndex, tabIndex, url, title, active flag per tab."
     :inputSchema {:type "object" :properties {}}}
 
    {:name "browser-read-active-tab"
-    :description "Read the content of the active browser tab. Without a query: returns url, title, line count, and a short preview. With a query: returns matching lines with surrounding context. Use format 'html' to get raw HTML instead of plain text. Note: requires 'Allow JavaScript from Apple Events' in browser Developer menu."
+    :description "Read the active browser tab's content. Without query: returns url, title, preview. With query: returns matching lines with context."
     :inputSchema
     {:type "object"
      :properties {:query {:type "string"
@@ -97,11 +97,11 @@
                            :enum ["text" "html"]}}}}
 
    {:name "browser-get-selection"
-    :description "Get the currently selected text in the active browser tab. Returns the selection as plain text, or empty string if nothing is selected."
+    :description "Get selected text in the active browser tab, or empty string if none."
     :inputSchema {:type "object" :properties {}}}
 
    {:name "browser-navigate"
-    :description "Navigate the active browser tab. Go to a URL, or perform back/forward/reload. Waits for page load before returning."
+    :description "Navigate the active browser tab to a URL or perform back/forward/reload."
     :inputSchema
     {:type "object"
      :properties {:url {:type "string"
@@ -111,7 +111,7 @@
                            :enum ["goto" "back" "forward" "reload"]}}}}
 
    {:name "browser-click"
-    :description "Click an element on the page. Find by CSS selector, visible text, or viewport coordinates. Selector/text dispatch PointerEvent+MouseEvent for framework compatibility. Coordinates (x, y) perform an OS-level CGEvent click, bypassing all DOM event delegation."
+    :description "Click an element by CSS selector, visible text, or viewport coordinates (x, y for OS-level click)."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"
@@ -126,7 +126,7 @@
                       :description "Viewport-relative Y coordinate for OS-level click. Use with x. Coordinates from browser-query bounding rects work directly."}}}}
 
    {:name "browser-type"
-    :description "Type text into an input, textarea, or contenteditable element. Dispatches input/change events for framework compatibility."
+    :description "Type text into a focused or selected input/textarea/contenteditable element."
     :inputSchema
     {:type "object"
      :properties {:text {:type "string"
@@ -140,7 +140,7 @@
      :required ["text"]}}
 
    {:name "browser-query"
-    :description "Query DOM elements and return structured information: tag, text, attributes, bounding rect, visibility. Essential for inspecting page structure before interacting."
+    :description "Query DOM elements by CSS selector. Returns tag, text, attributes, bounding rect, visibility."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"
@@ -150,7 +150,7 @@
      :required ["selector"]}}
 
    {:name "browser-execute-js"
-    :description "Execute arbitrary JavaScript in the active tab's page context. Last expression value is returned. Supports execution inside same-origin iframes."
+    :description "Execute JavaScript in the active tab. Last expression value is returned. Supports same-origin iframes."
     :inputSchema
     {:type "object"
      :properties {:code {:type "string"
@@ -160,7 +160,7 @@
      :required ["code"]}}
 
    {:name "browser-tab"
-    :description "Manage browser tabs: switch to a tab (by index or URL pattern), open a new tab, or close a tab."
+    :description "Switch, open, or close browser tabs."
     :inputSchema
     {:type "object"
      :properties {:action {:type "string"
@@ -177,11 +177,11 @@
      :required ["action"]}}
 
    {:name "browser-screenshot"
-    :description "Take a screenshot of the browser window. Returns a base64-encoded PNG image."
+    :description "Screenshot the browser window as base64 PNG."
     :inputSchema {:type "object" :properties {}}}
 
    {:name "browser-network"
-    :description "Monitor network requests. 'start' patches fetch/XHR to log requests. 'get' retrieves captured logs + Resource Timing data (works even without start). 'stop' restores originals. Use start before reload to capture all requests."
+    :description "Monitor network requests. start: begin capture, get: retrieve logs, stop: end capture."
     :inputSchema
     {:type "object"
      :properties {:action {:type "string"
@@ -192,7 +192,7 @@
      :required ["action"]}}
 
    {:name "browser-console-logs"
-    :description "Capture browser console output. 'start' patches console.log/warn/error/info/debug. 'get' retrieves captured entries. 'stop' restores originals."
+    :description "Capture browser console output. start/get/stop lifecycle."
     :inputSchema
     {:type "object"
      :properties {:action {:type "string"
@@ -204,7 +204,7 @@
      :required ["action"]}}
 
    {:name "browser-wait"
-    :description "Wait for a condition: element to appear/disappear, text on page, or URL to match pattern. Polls every 500ms until condition is met or timeout."
+    :description "Wait for an element, text, or URL pattern. Polls until condition met or timeout."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"
@@ -220,7 +220,7 @@
                             :description "Timeout in milliseconds (default: 10000)."}}}}
 
    {:name "browser-scroll"
-    :description "Scroll the page or a scrollable container. Scroll to an element, to top/bottom, or by pixel amount in a direction. Use container param to target nested scrollable areas like dialogs or modals."
+    :description "Scroll the page or a container to an element, top/bottom, or by pixel amount."
     :inputSchema
     {:type "object"
      :properties {:selector {:type "string"

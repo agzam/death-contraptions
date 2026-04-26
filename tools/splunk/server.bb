@@ -470,7 +470,7 @@
 
 (def tools
   [{:name        "splunk-search"
-    :description "Run an SPL search query against Splunk and return results. Prepends 'search' keyword automatically for non-piped queries. Use Splunk Search Processing Language (SPL)."
+    :description "Run an SPL query. Prepends 'search' keyword for non-piped queries."
     :inputSchema
     {:type       "object"
      :properties {:query         {:type        "string"
@@ -484,14 +484,14 @@
      :required   ["query"]}}
 
    {:name        "splunk-indexes"
-    :description "List available Splunk indexes with event counts and sizes. Useful for discovering what data exists before writing searches."
+    :description "List Splunk indexes with event counts and sizes."
     :inputSchema
     {:type       "object"
      :properties {:include_internal {:type        "string"
                                      :description "Set to 'true' to include internal indexes (prefixed with _). Default: false."}}}}
 
    {:name        "splunk-search-metadata"
-    :description "Discover hosts, sources, and sourcetypes for a Splunk index. Returns top 50 values by count. Useful for understanding what data an index contains."
+    :description "Discover hosts, sources, and sourcetypes for a Splunk index."
     :inputSchema
     {:type       "object"
      :properties {:index         {:type        "string"

@@ -29,26 +29,8 @@
 
 (def elisp-eval-tool
   {:name "elisp-eval"
-   :description "Evaluate Emacs Lisp code in the running Emacs server. Returns the result of evaluation along with any new *Messages* and *trace-output* produced during evaluation. State persists between calls. Only the return value of the last expression is captured. Write elisp naturally with no escaping needed.
-
-IMPORTANT constraints - this tool is synchronous (batch-mode, not interactive):
-- NEVER call functions that enter recursive-edit or prompt for input (e.g., read-string, y-or-n-p, edebug stepping). These will hang until timeout.
-- For debugging, use trace-function/trace-function-foreground instead of edebug. Backtraces are captured automatically on error. Trace output from *trace-output* is also captured automatically.
-- For interactive modes (games, shells), pause timers and interact turn-by-turn via direct function calls and buffer reads.
-- Use run-with-timer for async/non-blocking work.
-
-Common debugging patterns:
-- Describe a function: (describe-function 'foo) then (with-current-buffer (help-buffer) (buffer-substring-no-properties (point-min) (point-max)))
-- Buffer info: (list :buffer (buffer-name) :file buffer-file-name :mode major-mode :minor minor-mode-list :point (point) :modified (buffer-modified-p))
-- Active timers: (mapcar (lambda (t) (list (timer--function t) (timer--time t))) timer-list)
-- Running processes: (mapcar (lambda (p) (list (process-name p) (process-status p) (process-command p))) (process-list))
-- Find function source: (find-lisp-object-file-name 'foo (symbol-function 'foo))
-- Read special buffers (strip text properties to avoid output explosion): (with-current-buffer BUF (buffer-substring-no-properties (point-min) (point-max)))
-
-Session hygiene:
-- Minimize UI disruption: open buffers in background (e.g., with-current-buffer, display-buffer) unless foreground is required.
-- Kill any temporary buffers created during diagnostic or exploratory work.
-- When modifying hooks, advice, or global state via config files, mirror those changes in the running session: remove stale hooks/advice before adding, reload features as needed."
+   :description "Evaluate Emacs Lisp in the running Emacs server. Returns result, *Messages*, and *trace-output*. State persists between calls. Only last expression's return value is captured. No escaping needed.
+Constraints: synchronous/batch-mode. NEVER call functions that prompt for input or enter recursive-edit (read-string, y-or-n-p, edebug) - they hang. Use trace-function instead of edebug. Use run-with-timer for async work. For interactive modes, interact turn-by-turn via direct function calls and buffer reads. Strip text properties when reading special buffers to avoid output explosion."
    :inputSchema
    {:type "object"
     :properties {:code {:type "string"
@@ -63,7 +45,7 @@ Session hygiene:
 
 (def screenshot-tool
   {:name "emacs-screenshot"
-   :description "Capture a screenshot of the current Emacs frame as a PNG image. Useful for debugging display issues, themes, mode-line problems, or observing visual state. macOS only (uses screencapture)."
+   :description "Capture a screenshot of the current Emacs frame as a PNG image. macOS only."
    :inputSchema
    {:type "object"
     :properties {}

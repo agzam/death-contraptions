@@ -157,11 +157,11 @@
 
 (def tools
   [{:name        "kitty-ls"
-    :description "List all Kitty OS windows, tabs, and windows. Returns JSON tree with IDs, titles, PIDs, cwds. Use to discover targets for other commands."
+    :description "List Kitty windows and tabs as JSON with IDs, titles, PIDs, cwds."
     :inputSchema {:type "object" :properties {}}}
 
    {:name        "kitty-send"
-    :description "Type command text into the active Kitty window WITHOUT pressing Enter. The user reviews and executes manually. Use for active tab interaction."
+    :description "Type text into active Kitty window without pressing Enter."
     :inputSchema
     {:type       "object"
      :properties {:text {:type        "string"
@@ -169,7 +169,7 @@
      :required   ["text"]}}
 
    {:name        "kitty-launch"
-    :description "Open a new Kitty tab and run a command immediately. Use for background tasks, builds, long-running processes."
+    :description "Open a new Kitty tab and run a command in it."
     :inputSchema
     {:type       "object"
      :properties {:command {:type        "string"
@@ -183,7 +183,7 @@
      :required   ["command"]}}
 
    {:name        "kitty-get-text"
-    :description "Read the screen buffer of a Kitty window. Returns visible text. Use to check command output."
+    :description "Read the screen buffer of a Kitty window."
     :inputSchema
     {:type       "object"
      :properties {:match  {:type        "string"
@@ -192,7 +192,7 @@
                            :description "What to capture: 'screen' (default), 'all' (includes scrollback), 'selection'"}}}}
 
    {:name        "kitty-focus"
-    :description "Focus a Kitty tab or window by match expression."
+    :description "Focus a Kitty tab or window by match expression (e.g. 'id:42')."
     :inputSchema
     {:type       "object"
      :properties {:match {:type        "string"

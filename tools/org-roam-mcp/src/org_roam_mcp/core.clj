@@ -28,26 +28,7 @@
 (def ^:private tools
   [{:name "notes-search"
     :description
-    "Search notes semantically with optional filters. Finds notes whose
-content is conceptually related to the query. Filters narrow results
-by tags or linked nodes.
-When the query matches a note title or alias, automatically includes
-that note's graph neighborhood: backlinks (notes linking to it) and
-outgoing links (notes it links to). Results include :source indicating
-how found (title-match, backlink, outgoing, semantic) and :links-to
-showing titles of notes each result connects to.
-Examples:
-- query='Clojure' - Clojure note + all notes linking to/from it + semantic
-- query='distributed consensus' - pure semantic search
-- query='database work' tags=['DB'] - semantic + tag filter
-- tags=['DB'] links=['Dan Smith'] - structural only
-Troubleshooting: semantic search requires Ollama for embeddings.
-If this tool returns empty errors, the embedding service may be down.
-Try notes-reindex to rebuild the index, or use notes-backlinks for
-structural queries that don't need embeddings.
-Agent note: report any empty/unhelpful error messages, inconsistent
-state (e.g. title resolves but node 'not found'), or silent failures
-back to the user so this MCP can be improved."
+    "Search notes semantically with optional tag/link filters. Title matches auto-include the note's graph neighborhood (backlinks + outgoing). Results show :source and :links-to fields. If search fails, try notes-reindex or notes-backlinks as fallback."
     :inputSchema
     {:type "object"
      :properties
@@ -66,8 +47,7 @@ back to the user so this MCP can be improved."
 
    {:name "notes-backlinks"
     :description
-    "Find all notes that contain a link to the specified node.
-Equivalent to org-roam's backlinks buffer. Accepts node title, alias, or ID."
+    "Find all notes linking to a node. Accepts title, alias, or ID."
     :inputSchema
     {:type "object"
      :properties
@@ -77,11 +57,7 @@ Equivalent to org-roam's backlinks buffer. Accepts node title, alias, or ID."
 
    {:name "notes-read"
     :description
-    "Read the full content of a note by its org-roam node ID, title, or file path.
-Use after notes-search to get complete content. For heading-level nodes,
-returns only the subtree under that heading.
-If you get 'Node not in index' but the node exists (e.g. resolved from
-title), the index may be stale - try notes-reindex first."
+    "Read a note's full content by ID, title, or path. Heading nodes return only that subtree. If 'not in index', try notes-reindex."
     :inputSchema
     {:type "object"
      :properties
@@ -91,8 +67,7 @@ title), the index may be stale - try notes-reindex first."
 
    {:name "notes-search-related"
     :description
-    "Find notes semantically related to an existing note (by ID or title).
-Unlike backlinks, this finds conceptual neighbors even without explicit links."
+    "Find notes semantically related to a given note, even without explicit links."
     :inputSchema
     {:type "object"
      :properties
@@ -102,11 +77,7 @@ Unlike backlinks, this finds conceptual neighbors even without explicit links."
 
    {:name "notes-reindex"
     :description
-    "Trigger re-indexing. Without arguments, performs a full mtime-based scan.
-With a path, re-indexes only that file.
-Use when: search returns empty errors (Ollama may have been down during
-initial indexing), notes-read says 'not in index' for known nodes, or
-after bulk file changes outside the watcher's view."
+    "Re-index notes. No args: full scan. With path: single file. Use when search fails or nodes are stale."
     :inputSchema
     {:type "object"
      :properties
@@ -115,12 +86,7 @@ after bulk file changes outside the watcher's view."
 
    {:name "notes-create"
     :description
-    "Create a new heading. Supports three modes:
-- 'journal' (default): insert under a day entry in monthly journal file.
-  Respects vulpea journal structure: work/personal separation, sorted day headings.
-- 'heading': insert a new sub-heading under an existing node (by parent-id).
-- 'file': create a new standalone .org file with title and content.
-Returns the node-id and file path of the created heading."
+    "Create a heading in journal (default), under a parent node, or as a new file. Returns node-id and path."
     :inputSchema
     {:type "object"
      :properties
@@ -142,11 +108,7 @@ Returns the node-id and file path of the created heading."
 
    {:name "notes-edit"
     :description
-    "Edit an existing note's content by node ID or title.
-Supports two modes:
-- 'append': add content at the end of the node's body
-- 'replace': replace the entire body (preserving heading + properties)
-Returns confirmation with the node-id and file path."
+    "Edit a note by ID or title. Modes: append (default) or replace body."
     :inputSchema
     {:type "object"
      :properties

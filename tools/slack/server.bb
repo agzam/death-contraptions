@@ -494,7 +494,7 @@
 
 (def tools
   [{:name        "slack-search"
-    :description "Search Slack messages. Returns matching messages with author, channel, timestamp, and permalink. Uses the default workspace unless a specific one is provided."
+    :description "Search Slack messages. Returns matches with author, channel, timestamp, permalink."
     :inputSchema
     {:type       "object"
      :properties {:query     {:type        "string"
@@ -508,7 +508,7 @@
      :required   ["query"]}}
 
    {:name        "slack-fetch-thread"
-    :description "Fetch a Slack conversation or thread given a Slack message URL. Returns the full thread with all replies, each with a permalink. Resolves user mentions to display names."
+    :description "Fetch a Slack thread by URL. Returns all replies with permalinks. Resolves user mentions."
     :inputSchema
     {:type       "object"
      :properties {:url {:type        "string"
