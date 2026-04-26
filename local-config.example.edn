@@ -3,7 +3,9 @@
 ;;
 ;; Each :servers entry is flat config written as-is to the tool's config.edn.
 ;; Servers not listed use defaults from their existing config.edn.
-;; Reserved meta: :disabled? true skips the server entirely (default: enabled).
+;; Reserved meta: :disabled? true keeps the server in ECA config but
+;; doesn't auto-start it. It shows up in (eca-mcp-details) and can be
+;; started manually. Other clients (Claude Desktop, Copilot) skip it.
 
 {;; ECA/Claude Code settings (merged into config.json top-level)
  :eca

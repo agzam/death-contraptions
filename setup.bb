@@ -111,8 +111,9 @@
 (defn build-server-entries
   "Build the mcpServers map for config.json.
    Each :servers entry in local-config is flat key/value config written
-   verbatim to the tool's config.edn, minus the reserved :disabled? flag
-   which setup.bb strips. Default is enabled; :disabled? true skips."
+   verbatim to the tool's config.edn, minus the reserved :disabled? flag.
+   When :disabled? true, the server is still included with
+   {:disabled true} so ECA shows it but doesn't auto-start it."
   [local-config]
   (let [local-servers (:servers local-config {})]
     (reduce-kv
@@ -122,12 +123,10 @@
          (let [local (get local-servers (keyword name) {})
                disabled? (:disabled? local false)
                cfg (dissoc local :disabled?)]
-           (if disabled?
-             acc
-             (do
-               (when (seq cfg)
-                 (write-server-config! name cfg))
-               (assoc acc name {:command (str tools-dir "/" command)}))))))
+           (when (and (not disabled?) (seq cfg))
+             (write-server-config! name cfg))
+           (assoc acc name (cond-> {:command (str tools-dir "/" command)}
+                             disabled? (assoc :disabled true))))))
      {}
      servers)))
 
@@ -297,11 +296,13 @@ end tell"
           (println (str "  removed stale: " repo-dir "/" f)))))
 
     ;; Claude Desktop local MCP config (platform-specific path).
+    ;; Exclude disabled servers - Claude Desktop doesn't support the concept.
     (when-let [dir (claude-desktop-config-dir)]
       (ensure-dir dir)
-      (spit (str dir "claude_desktop_config.json")
-            (json/generate-string {:mcpServers server-entries} {:pretty true}))
-      (println (str "  wrote: " dir "claude_desktop_config.json")))
+      (let [enabled (into {} (remove (fn [[_ v]] (:disabled v))) server-entries)]
+        (spit (str dir "claude_desktop_config.json")
+              (json/generate-string {:mcpServers enabled} {:pretty true}))
+        (println (str "  wrote: " dir "claude_desktop_config.json"))))
 
     ;; Push AGENTS.md into claude.ai's server-side Personal preferences.
     ;; This is the only channel through which rules reach Desktop chat,
@@ -324,7 +325,8 @@ end tell"
       (println (str "  symlink: ~/.claude/skills -> " skills-dir))
       (when (.exists (io/file claude-json))
         (let [existing (json/parse-string (slurp claude-json) true)
-              updated (assoc existing :mcpServers server-entries)]
+              enabled (into {} (remove (fn [[_ v]] (:disabled v))) server-entries)
+              updated (assoc existing :mcpServers enabled)]
           (spit claude-json (json/generate-string updated {:pretty true}))
           (println (str "  wrote: " claude-json " (mcpServers)")))))
 
@@ -346,8 +348,9 @@ end tell"
             ;; array) and rejects type "local"; the stdio branch just
             ;; needs {command, args}. String keys throughout so merge
             ;; does not see "k8s" and :k8s as distinct and duplicate.
+            enabled (into {} (remove (fn [[_ v]] (:disabled v))) server-entries)
             copilot-entries (update-vals
-                             server-entries
+                             enabled
                              (fn [v] {"command" (:command v) "args" []}))
             existing (if (.exists (io/file mcp-path))
                        (json/parse-string (slurp mcp-path))
