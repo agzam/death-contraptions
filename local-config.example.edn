@@ -10,6 +10,7 @@
 {;; ECA/Claude Code settings (merged into config.json top-level)
  :eca
  {:defaultModel "anthropic/claude-sonnet-4-20250514"
+  :autoCompactPercentage 90
   :agent {:code {:variant "max"}
           :plan {:variant "max"}}}
 

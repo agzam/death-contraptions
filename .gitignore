@@ -16,3 +16,4 @@ target/
 
 # Logs
 *.log
+.claude/settings.local.json

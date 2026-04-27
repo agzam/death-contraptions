@@ -45,6 +45,12 @@ Always allowed (read-only): `git status/diff/log/show/blame/fetch/ls-files/rev-p
 
 Never add Co-Authored-By or AI attribution to commits.
 
+# GitHub/GitLab/etc.
+
+- Provide code pointers in forge format: `https://github.com/ORG/REPO/blob/BRANCH/FILE#L1-L10`, or `/path/to/file.ext:1-42` for local files.
+
+- Never throw plain PR/Issue numbers, always show them in bug-reference style - ORG/REPO#42
+
 # CLI tools
 
 - Prefer `rg` and `fd` over `grep` and `find`.
@@ -59,7 +65,6 @@ Never add Co-Authored-By or AI attribution to commits.
 
 - No dangling parens/brackets in Lisp-family languages.
 
-- Provide code pointers in forge format: `https://github.com/ORG/REPO/blob/BRANCH/FILE#L1-L10`, or `/path/to/file.ext:1-42` for local files.
 
 ## Elisp
 - After modifying `.el` files, always `load-file` them via `elisp-eval` silently.
@@ -76,7 +81,7 @@ Solve with minimum code. No unasked features, one-time abstractions, speculative
 
 ## Verifiable Outcomes
 
-Focus on solutions, not reports. Turn requests into success criteria. For multi-step tasks, plan with verification points. Prefer tests and concrete validation over verbal confidence.
+Focus on solutions, not reports. Turn requests into success criteria. For multi-step tasks, plan with verification points. **Always** prefer tests and concrete validation over verbal confidence.
 
 ## Ask When It Matters
 
