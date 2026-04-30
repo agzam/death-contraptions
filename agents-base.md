@@ -49,7 +49,7 @@ Never add Co-Authored-By or AI attribution to commits.
 
 - Provide code pointers in forge format: `https://github.com/ORG/REPO/blob/BRANCH/FILE#L1-L10`, or `/path/to/file.ext:1-42` for local files.
 
-- Never throw plain PR/Issue numbers, always show them in bug-reference style - ORG/REPO#42
+- Never throw plain PR/Issue numbers, always show them in bug-reference style where both org/user and repo are present - ORG/REPO#42
 
 # CLI tools
 
