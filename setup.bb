@@ -61,6 +61,8 @@
    "kitty"        {:command "kitty/server.bb"
                    :platform :darwin}
    "qlik-kb"      {:command "qlik-kb/server.bb"
+                   :platform :all}
+   "nrepl"        {:command "nrepl/server.bb"
                    :platform :all}})
 
 (defn load-local-config

@@ -25,7 +25,8 @@
                               :remote-port 11434
                               :local-port 11434}}
   :qlik-kb {:disabled? true
-            :qcs-api-token "your_qcs_api_token"}}
+            :qcs-api-token "your_qcs_api_token"}
+  :nrepl   {:disabled? true}}
 
  ;; Extra content appended to AGENTS.md (optional)
  ;; :agents-extra "..."
