@@ -17,11 +17,12 @@
 
 (def ^:private helpers-path
   "Absolute path to helpers.el, resolved relative to this script."
-  (str (-> (System/getProperty "babashka.file")
-           (java.io.File.)
-           (.getParentFile)
-           (.getAbsolutePath))
-       "/helpers.el"))
+  (let [script-dir (if-let [bf (System/getProperty "babashka.file")]
+                     (-> (java.io.File. bf)
+                         (.getParentFile)
+                         (.getAbsolutePath))
+                     (System/getProperty "user.dir"))]
+    (str script-dir "/helpers.el")))
 
 (defn- ensure-helpers-loaded!
   "Load helpers.el into Emacs on first eval call."
