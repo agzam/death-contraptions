@@ -2,7 +2,7 @@
 
 ;; Setup script for death-contraptions MCP tools.
 ;; Generates config files for ECA/Claude Code CLI, Claude Desktop,
-;; symlinks tools and skills into ~/.config/eca/.
+;; copies skills/commands and symlinks tools into ~/.config/eca/.
 
 (require '[cheshire.core :as json]
          '[clojure.edn :as edn]
@@ -155,14 +155,39 @@
   [path]
   (.mkdirs (io/file path)))
 
+(defn- remove-path
+  "Remove a file, symlink, or directory (recursively) at the given path."
+  [^java.nio.file.Path p]
+  (let [no-follow (into-array java.nio.file.LinkOption [java.nio.file.LinkOption/NOFOLLOW_LINKS])]
+    (when (java.nio.file.Files/exists p no-follow)
+      (if (and (java.nio.file.Files/isDirectory p no-follow)
+               (not (java.nio.file.Files/isSymbolicLink p)))
+        (let [children (iterator-seq (.iterator (java.nio.file.Files/list p)))]
+          (run! remove-path children)
+          (java.nio.file.Files/delete p))
+        (java.nio.file.Files/delete p)))))
+
 (defn create-symlink
-  "Create a symlink, removing existing one if present."
+  "Create a symlink, removing existing file, symlink, or directory if present."
   [link target]
   (let [link-path (java.nio.file.Paths/get link (into-array String []))
         target-path (java.nio.file.Paths/get target (into-array String []))]
-    (when (java.nio.file.Files/exists link-path (into-array java.nio.file.LinkOption []))
-      (java.nio.file.Files/delete link-path))
+    (remove-path link-path)
     (java.nio.file.Files/createSymbolicLink link-path target-path (into-array java.nio.file.attribute.FileAttribute []))))
+
+(defn copy-tree
+  "Copy a directory tree from src to dst, replacing any existing content."
+  [src dst]
+  (let [src-path (java.nio.file.Paths/get src (into-array String []))
+        dst-path (java.nio.file.Paths/get dst (into-array String []))
+        replace (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/REPLACE_EXISTING])]
+    (remove-path dst-path)
+    (run! (fn [source]
+            (let [target (.resolve dst-path (.relativize src-path source))]
+              (if (java.nio.file.Files/isDirectory source (into-array java.nio.file.LinkOption []))
+                (java.nio.file.Files/createDirectories target (into-array java.nio.file.attribute.FileAttribute []))
+                (java.nio.file.Files/copy source target replace))))
+          (iterator-seq (.iterator (java.nio.file.Files/walk src-path (into-array java.nio.file.FileVisitOption [])))))))
 
 (defn- b64-encode
   "UTF-8 base64 encode for safely smuggling large strings through osascript."
@@ -324,10 +349,10 @@ end tell"
         (java.nio.file.Files/deleteIfExists p)
         (spit dst agents-content)
         (println (str "  wrote: " dst)))
-      (create-symlink (str claude-dir "/skills") skills-dir)
-      (println (str "  symlink: ~/.claude/skills -> " skills-dir))
-      (create-symlink (str claude-dir "/commands") commands-dir)
-      (println (str "  symlink: ~/.claude/commands -> " commands-dir))
+      (copy-tree skills-dir (str claude-dir "/skills"))
+      (println (str "  copied: ~/.claude/skills"))
+      (copy-tree commands-dir (str claude-dir "/commands"))
+      (println (str "  copied: ~/.claude/commands"))
       (when (.exists (io/file claude-json))
         (let [existing (json/parse-string (slurp claude-json) true)
               enabled (into {} (remove (fn [[_ v]] (:disabled v))) server-entries)
@@ -346,10 +371,10 @@ end tell"
         (java.nio.file.Files/deleteIfExists p)
         (spit dst agents-content)
         (println (str "  wrote: " dst)))
-      (create-symlink (str copilot-dir "/skills") skills-dir)
-      (println (str "  symlink: " copilot-dir "/skills -> " skills-dir))
-      (create-symlink (str copilot-dir "/commands") commands-dir)
-      (println (str "  symlink: " copilot-dir "/commands -> " commands-dir))
+      (copy-tree skills-dir (str copilot-dir "/skills"))
+      (println (str "  copied: " copilot-dir "/skills"))
+      (copy-tree commands-dir (str copilot-dir "/commands"))
+      (println (str "  copied: " copilot-dir "/commands"))
       (let [mcp-path (str copilot-dir "/mcp-config.json")
             ;; Copilot CLI's zod schema makes args required (must be an
             ;; array) and rejects type "local"; the stdio branch just
@@ -381,11 +406,11 @@ end tell"
     (create-symlink (str eca-dir "/tools") tools-dir)
     (println (str "  symlink: ~/.config/eca/tools -> " tools-dir))
 
-    (create-symlink (str eca-dir "/skills") skills-dir)
-    (println (str "  symlink: ~/.config/eca/skills -> " skills-dir))
+    (copy-tree skills-dir (str eca-dir "/skills"))
+    (println (str "  copied: ~/.config/eca/skills"))
 
-    (create-symlink (str eca-dir "/commands") commands-dir)
-    (println (str "  symlink: ~/.config/eca/commands -> " commands-dir))
+    (copy-tree commands-dir (str eca-dir "/commands"))
+    (println (str "  copied: ~/.config/eca/commands"))
 
     ;; qlik-kb runs an out-of-repo prebuilt binary cached under tools/qlik-kb/bin.
     ;; Warn (non-fatal) when it's missing so first-run or post-pull users know
