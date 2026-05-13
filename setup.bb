@@ -13,6 +13,7 @@
 (def repo-dir (-> *file* io/file .getParentFile .getCanonicalPath))
 (def tools-dir (str repo-dir "/tools"))
 (def skills-dir (str repo-dir "/skills"))
+(def commands-dir (str repo-dir "/commands"))
 (def eca-dir (str (System/getenv "HOME") "/.config/eca"))
 (def os-kind
   (let [os (str/lower-case (System/getProperty "os.name"))]
@@ -325,6 +326,8 @@ end tell"
         (println (str "  wrote: " dst)))
       (create-symlink (str claude-dir "/skills") skills-dir)
       (println (str "  symlink: ~/.claude/skills -> " skills-dir))
+      (create-symlink (str claude-dir "/commands") commands-dir)
+      (println (str "  symlink: ~/.claude/commands -> " commands-dir))
       (when (.exists (io/file claude-json))
         (let [existing (json/parse-string (slurp claude-json) true)
               enabled (into {} (remove (fn [[_ v]] (:disabled v))) server-entries)
@@ -345,6 +348,8 @@ end tell"
         (println (str "  wrote: " dst)))
       (create-symlink (str copilot-dir "/skills") skills-dir)
       (println (str "  symlink: " copilot-dir "/skills -> " skills-dir))
+      (create-symlink (str copilot-dir "/commands") commands-dir)
+      (println (str "  symlink: " copilot-dir "/commands -> " commands-dir))
       (let [mcp-path (str copilot-dir "/mcp-config.json")
             ;; Copilot CLI's zod schema makes args required (must be an
             ;; array) and rejects type "local"; the stdio branch just
@@ -378,6 +383,9 @@ end tell"
 
     (create-symlink (str eca-dir "/skills") skills-dir)
     (println (str "  symlink: ~/.config/eca/skills -> " skills-dir))
+
+    (create-symlink (str eca-dir "/commands") commands-dir)
+    (println (str "  symlink: ~/.config/eca/commands -> " commands-dir))
 
     ;; qlik-kb runs an out-of-repo prebuilt binary cached under tools/qlik-kb/bin.
     ;; Warn (non-fatal) when it's missing so first-run or post-pull users know
