@@ -1,7 +1,3 @@
-# Don't modify!
-Never directly modify ~/.config/eca/AGENTS.md or ~/.claude/CLAUDE.md - they get generated.
-Instead make changes ~/GitHub/agzam/death-contraptions/agents-base.md.
-
 # Rules
 - Don't be too verbose.
 - Never use bold (**text**) or italic (*text*) emphasis.
@@ -11,10 +7,6 @@ Instead make changes ~/GitHub/agzam/death-contraptions/agents-base.md.
 
 Strive for deep, complete analysis of all ingested context (Jira, PRs, Slack, code, etc.). When an attachment or linked resource cannot be accessed, list what was missed, state analysis is incomplete, and offer the user to provide it manually.
 
-## Codebase freshness
-
-Before analyzing a codebase, run `git fetch` and `git status`. Clean main/master: `git pull --ff-only`. Other clean branch: report branch and ahead/behind, ask before pulling. Dirty tree: never pull, analyze as-is and state it. For reviews, also report divergence from `origin/main`. Never run mutating git commands (stash, reset, checkout, merge, rebase, pull --rebase/--force, clean) without explicit user instruction.
-
 ## Investigation specs
 
 Past investigations live at `~/GitHub/{org}/llm-specs/`, indexed by `MANIFEST.md`.
@@ -23,17 +15,7 @@ Past investigations live at `~/GitHub/{org}/llm-specs/`, indexed by `MANIFEST.md
 - When working a ticket that has a spec, treat it as a living document. Update Progress, status, refs, and Changelog as findings change. Don't wait to be asked.
 - For the full create/discover/update workflow, load the `create-spec` skill.
 
-# MCP
-
-- After modifying MCP server code/config, restart affected server(s) via elisp-eval immediately:
-    ```elisp
-    (let ((session (eca-session)))
-      (eca-api-notify session :method "mcp/stopServer" :params (list :name SERVER_NAME))
-      (run-with-timer 2 nil (lambda () (eca-api-notify (eca-session) :method "mcp/startServer" :params (list :name SERVER_NAME)))))
-    ```
-- All custom MCP servers are experimental. Report empty/cryptic errors, inconsistent state, or silent failures so the MCP can be improved.
-
-# Tool routing
+## Tool routing
 
 Use the narrowest tool for the question:
 - Qlik-internal topics: `qlik-kb` search tools first. Honor source-citation templates.
@@ -43,7 +25,9 @@ Use the narrowest tool for the question:
 - Mixed Qlik+code: `qlik-kb` first, then `eca__grep`.
 - If `qlik-kb` errors, fall back to `web_search` against `qlik.dev`/`help.qlik.com` and surface the failure.
 
-# GIT
+- All custom MCP servers are experimental. Report empty/cryptic errors, inconsistent state, or silent failures so the MCP can be improved.
+
+# Git
 
 ABSOLUTE RULE: Never run any git/gh write command unless the user's CURRENT message EXPLICITLY names that action (commit, push, merge, rebase, reset, revert, amend, open PR, etc.). Finishing a task is NOT permission to publish. Prior permission never carries over. Ambiguity defaults to DO NOT ACT - show state and ask.
 
@@ -53,10 +37,18 @@ Always allowed (read-only): `git status/diff/log/show/blame/fetch/ls-files/rev-p
 
 Never add Co-Authored-By or AI attribution to commits.
 
-# GitHub/GitLab/etc.
+## Codebase freshness
+
+- Always check if repo uses worktrees and act accordingly
+- Prior to anything else, run `git fetch` and `git status` in the correct branch/worktree for **every** repo involved.
+- Clean main/master: `git pull --ff-only`. Other clean branch: report branch and ahead/behind, ask before pulling. 
+- Dirty tree: never pull, analyze as-is and state it. 
+- For reviews, also report divergence from `origin/main`. 
+- Never run mutating git commands (stash, reset, checkout, merge, rebase, pull --rebase/--force, clean) without explicit user instruction.
+
+## GitHub/GitLab/etc.
 
 - Provide code pointers in forge format: `https://github.com/ORG/REPO/blob/BRANCH/FILE#L1-L10`, or `/path/to/file.ext:1-42` for local files.
-
 - Never throw plain PR/Issue numbers, always show them in bug-reference style where both org/user and repo are present - ORG/REPO#42
 
 # CLI tools
@@ -66,44 +58,50 @@ Never add Co-Authored-By or AI attribution to commits.
 
 # Code
 - Docstrings: brief, explain reasoning, don't retell functionality.
-- Prefer `<` over `>` in Lisp comparisons.
-- No dangling parens/brackets in Lisp-family languages.
+- No explicit mentioning of ticket numbers, issues or PRs in the code - that info can be discovered via git blame.
 
-## Lint after edits
+## Lisp
+- Prefer `<` over `>` in Lisp - Clojure, Elisp, Fennel, etc.
+- No dangling parens/brackets
 
-- Clojure - clj-kondo
-- Python - ruff
-- Fennel - fnlfmt
-- Elisp - check-paren, checkdoc, package-lint
-- Org - org-lint, org-table-align with column width rows for wide columns
-- Yaml - yamllint
+### Elisp
+- After modifying `.el` files, always `load-file` them via `elisp-eval` without asking.
+- In Elisp, never write `let` + `if`/`when` to bind a value and then immediately test it for non-nil. Use `if-let*` or `when-let*` instead. e.g., `(let ((x (foo))) (if x ...))` must be `(if-let* ((x (foo))) ...)`. Same for multiple bindings chained before a nil check.
+
+## Always lint after edits
+
+| Clojure | clj-kondo |
+|---------|-----------|
+| Python | ruff |
+| Fennel | fnlfmt |
+| Elisp | check-paren, checkdoc, package-lint |
+| Org | org-lint, org-table-align with column width rows for wide columns |
+| Yaml | yamllint |
+| Anything ee el  else | find suitable linter or inform user of its absence |
 
 ## Test
 
-- Add a test for every single improvement and a new feature you add. Don't wait for me to instruct for it.
-
+- Add a test for every single improvement and a new feature you add.
 - Every code change should be covered by test adjustment.
-
 - Take active action in preventing future regressions. 
-
-## Elisp
-- After modifying `.el` files, always `load-file` them via `elisp-eval` silently.
-- In Elisp, never write `let` + `if`/`when` to bind a value and then immediately test it for non-nil. Use `if-let*` or `when-let*` instead. E.g., `(let ((x (foo))) (if x ...))` must be `(if-let* ((x (foo))) ...)`. Same for multiple bindings chained before a nil check.
-- Never hard-wrap prose in Org/Markdown. One paragraph per line, newlines only for structural elements.
-
-### Don't break active Emacs
-
-NEVER break the active Emacs session when testing.
-The user's Emacs is a live working environment - not a disposable test harness. When running elisp-eval for testing: save and restore any global/buffer-local variables you mutate, unbind any temporary advice or hooks you add, kill any temporary buffers you create, and undo any mode or state changes. Wrap test code in `unwind-protect` or equivalent to guarantee cleanup even on error. If a test requires destructive changes that cannot be safely reversed, do NOT run it in the live session - write it to a file and instruct the user to run it in a separate `emacs -Q` instead.
-
-### buttercup tests
-
-Failing buttercup tests throw enormously large stacktraces that quickly junk-up the context. Always limit them, e.g. `make test | rg FAILED`
 
 ### elisp-eval hygiene
 
 - Elisp expressions often return large structures (buffer lists, package alists, plists, hash-tables). Use the `print_length` and `print_level` tool parameters to cap output - default to small values (e.g., 20/5) and increase only when you actually need more.
 - Never manually scan or edit code to fix unbalanced parentheses. Run `(check-parens)` first - it signals the exact mismatch location. Only then make a targeted one-character fix.
+
+### Don't break active Emacs
+
+- NEVER break the active Emacs session when testing with elisp-eval.
+- The user's Emacs is a live working environment - not a disposable test harness. 
+- Try to minimize distractions, don't pop the buffers unless you have to - create them buried, in the back of the stack. 
+- When running elisp-eval for testing: save and restore any global/buffer-local variables you mutate, unbind any temporary advice or hooks you add, kill any temporary buffers you create, and undo any mode or state changes. 
+- Wrap test code in `unwind-protect` or equivalent to guarantee cleanup even on error. 
+- If a test requires destructive changes that cannot be safely reversed, do NOT run it in the live session - write it to a file and instruct the user to run it in a separate `emacs -Q` instead.
+
+### buttercup tests
+
+Failing buttercup tests throw enormously large stacktraces that quickly junk-up the context. Always limit them, e.g. `make test | rg FAILED`
 
 ## Think Before You Code
 
