@@ -100,7 +100,7 @@ Discarded approaches AND ruled-out hypotheses/repos. Prevents future re-explorat
 Present only when status is not `resolved`. Authoritative for in-flight state.
 
 Workspace:
-- org/repo-a @ feature/foo (3 dirty files, 1 stash)
+- org/repo-a @ feature/foo (worktree, 3 dirty files, pushed, PR org/repo-a#42)
 - org/repo-b @ main (clean)
 
 Confirmed:
@@ -213,3 +213,4 @@ When picking up an existing spec and the world has moved on:
 - For status `investigating` or `planned`, every `Solution` item and material claim in `Root cause` must be tagged `[confirmed]` or `[hypothesized]`. Required, not optional - lets a reader instantly separate facts from hunches.
 - For status `implementing`, additionally tag completed items `[done]`. Once `resolved`, markers can be cleaned up since the spec becomes historical.
 - Open questions are investigation debt. Re-attempt at every spec update; do not carry them forward without trying.
+- No absolute filesystem paths in spec content. All file references use `org/repo:path:line`. Worktree entries are descriptors - repo, branch, and state flags - not filesystem locations; consumers resolve actual paths at runtime via `git worktree list`. Shell commands in Useful commands are expressed relative to repo root, prefixed with repo context when ambiguous (e.g., `org/repo-a: clojure -M:test`). This keeps specs portable across machines with different checkout layouts.

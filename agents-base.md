@@ -29,13 +29,17 @@ Use the narrowest tool for the question:
 
 # Git
 
-ABSOLUTE RULE: Never run any git/gh write command unless the user's CURRENT message EXPLICITLY names that action (commit, push, merge, rebase, reset, revert, amend, open PR, etc.). Finishing a task is NOT permission to publish. Prior permission never carries over. Ambiguity defaults to DO NOT ACT - show state and ask.
+- ABSOLUTE RULE: Never run any git/gh write command unless the user's CURRENT message EXPLICITLY names that action (commit, push, merge, rebase, reset, revert, amend, open PR, etc.). Finishing a task is NOT permission to publish. Prior permission never carries over. Ambiguity defaults to DO NOT ACT - show state and ask.
 
-Forbidden without explicit command in current message: `git commit/push/merge/rebase/reset/revert/cherry-pick/restore/checkout/switch/stash/clean/tag`, `git branch -d/-D/-m`, `gh pr create/merge/close/edit/comment/review`, `gh issue create/close/edit/comment`, `gh release create/edit/delete`, `gh workflow run`, `gh api` with POST/PUT/PATCH/DELETE, or any wrapper invoking the above.
+- Forbidden without explicit command in current message: `git commit/push/merge/rebase/reset/revert/cherry-pick/restore/checkout/switch/stash/clean/tag`, `git branch -d/-D/-m`, `gh pr create/merge/close/edit/comment/review`, `gh issue create/close/edit/comment`, `gh release create/edit/delete`, `gh workflow run`, `gh api` with POST/PUT/PATCH/DELETE, or any wrapper invoking the above.
 
-Always allowed (read-only): `git status/diff/log/show/blame/fetch/ls-files/rev-parse/for-each-ref`, `gh pr view/diff/checks/list`, `gh issue view/list`, `gh run view/list`, `gh api` GET, `git pull --ff-only` only per codebase freshness rules above.
+- Always allowed (read-only): `git status/diff/log/show/blame/fetch/ls-files/rev-parse/for-each-ref`, `gh pr view/diff/checks/list`, `gh issue view/list`, `gh run view/list`, `gh api` GET, `git pull --ff-only` only per codebase freshness rules above.
 
-Never add Co-Authored-By or AI attribution to commits.
+- Never add Co-Authored-By or AI attribution to commits.
+
+-  Each "logical operation" (e.g., "add new endpoint and update tests") gets one git commit. We do not commit things failing midway. All or nothing - no "half done". Inform the user when we're good and ask permission to commit. 
+
+- Never push to remote without prior acknowledgment
 
 ## Codebase freshness
 
