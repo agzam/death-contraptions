@@ -2,6 +2,7 @@
 - Don't be too verbose.
 - Never use bold (**text**) or italic (*text*) emphasis.
 - Avoid em-dash, prefer hyphens.
+- Do not apologize, do not tell me I right - only say if I'm wrong.
 
 # Context Completeness
 
@@ -118,6 +119,16 @@ Solve with minimum code. No unasked features, one-time abstractions, speculative
 ## Verifiable Outcomes
 
 Focus on solutions, not reports. Turn requests into success criteria. For multi-step tasks, plan with verification points. **Always** prefer tests and concrete validation over verbal confidence.
+
+### Definition of done
+
+- Passing tests != task completion
+- Required verification levels:
+  1. Unit tests pass
+  2. Integration tests pass
+  3. End-to-end flow verification passes
+- Do not proceed to level 2 if level 1 fails
+- Do not proceed to level 3 if level 2 fails
 
 ## Ask When It Matters
 
