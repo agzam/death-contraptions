@@ -64,7 +64,10 @@
    "qlik-kb"      {:command "qlik-kb/server.bb"
                    :platform :all}
    "nrepl"        {:command "nrepl/server.bb"
-                   :platform :all}})
+                   :platform :all}
+   "playwright"   {:command "playwright/server.bb"
+                   :platform :darwin
+                   :default-disabled? true}})
 
 (defn load-local-config
   "Read local-config.edn, trying .gpg first (via gpg --decrypt), then plain."
@@ -120,11 +123,11 @@
   [local-config]
   (let [local-servers (:servers local-config {})]
     (reduce-kv
-     (fn [acc name {:keys [command platform]}]
+     (fn [acc name {:keys [command platform default-disabled?]}]
        (if-not (platform-matches? platform)
          acc
          (let [local (get local-servers (keyword name) {})
-               disabled? (:disabled? local false)
+               disabled? (boolean (:disabled? local default-disabled?))
                cfg (dissoc local :disabled?)]
            (when (and (not disabled?) (seq cfg))
              (write-server-config! name cfg))
@@ -427,4 +430,7 @@ end tell"
 
     (println "Done.")))
 
-(-main)
+;; Guard so load-file (e.g. setup_test.bb) can pull in the defs without
+;; running setup. Direct `bb setup.bb` still runs because *file* matches.
+(when (= *file* (System/getProperty "babashka.file"))
+  (-main))
