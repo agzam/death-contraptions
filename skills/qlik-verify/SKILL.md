@@ -53,29 +53,55 @@ Drive it via `nrepl-eval` with `:port <that port>` and `:await true`. The QCDI h
 
 Routes: `/data-integration/{home,create,connections/all,projects/all,monitoring/all,catalog/all}`.
 
-If you land on `login-staging.qlik.com` or a tenant login page, STOP and ask the user to complete login in the profile (SSO/MFA), then resume - `:persistent` mode keeps that login for next time. Only automate login when the env's `:login-ref` is the SDE rootadmin and the user opted in: keycloak at `keycloak.<sde>.pte.qlikdev.com`, then `(browser-repl/fill [:label "Username or email"] u)`, `(browser-repl/fill [:label "Password"] p)` (values pulled from the encrypted config; never printed), `(browser-repl/click [:role "button" {:name "Sign In"}])`.
+If you land on `login-staging.qlik.com` or a tenant login page, STOP and ask the user to complete login in the profile (SSO/MFA), then resume - `:persistent` mode keeps that login for next time. Only automate login when the env's `:login-ref` is the SDE rootadmin and the user opted in. The keycloak form (`keycloak.<sde>.pte.qlikdev.com`, title "Sign in to Qlik") has stable ids - fill by id, not label:
+
+```clojure
+(browser-repl/fill "#username" u) (browser-repl/fill "#password" p)
+(browser-repl/click "#kc-login")            ; the "Sign In" submit input
+```
+
+`u`/`p` come from the env's `:credentials` when present, else the SDE default `rootadmin` / `Qlik1234` (vohi's config stores none: `:has-credentials false`). Never print them. After submit, confirm with `(browser-repl/current-url)` landing on `/data-integration/home` and no `input[type=password]`.
 
 ## 3. Start the backend watcher (dual-agent)
 
 Start monitors BEFORE triggering the UI action, so events are caught live. Use the `monitor` skill (background jobs), not polling. Always `--live --max-runtime <sec>` and kill them when done.
 
-SDE (k8s available) - watch the stitch services and pod health:
+SDE (k8s available) - if the env's `:kube-context` is unset (`FILL_ME`), do not pass `--context`; point stern at the kubeconfig and let it use the current-context (`~/.kube/<sde>` has exactly one). Watch the stitch services for real errors:
 
 ```sh
 /Users/ryl/GitHub/agzam/death-contraptions/tools/monitor/monitor.bb \
-  --source "stern --context <kube-context> -n <ns> '(stitch-connections|stitch-menagerie|stitch-orchestrator|stitch-bobbin|target-qlik|stitch-agent)' -o raw" \
-  --regex "<correlation-id>|level=error|panic" --live --max-runtime 600
+  --source "stern --kubeconfig ~/.kube/<sde> -n default --color never -o default --since 3s '(stitch-connections|stitch-menagerie|stitch-orchestrator|stitch-bobbin|target-qlik|stitch-agent)'" \
+  --regex '(?i)("level"\s*:\s*"(error|fatal)"|\blevel=(error|fatal)\b|\bpanic:|stacktrace)' --live --max-runtime 900
 ```
 
-US Stage (no cluster) - Splunk only. Query `:splunk :index` filtered by the correlation IDs from step 4 via `splunk-search`; for a continuous watch, monitor a Splunk CLI stream the same way.
+Filter notes (learned the hard way):
+- These streams are mixed-format - app containers log JSON, but `election`/`postgres`/`migration-runner` log plaintext - so a `--regex` on the `level` field is more robust than `--jq` (which errors on the non-JSON lines). Match the structured level explicitly: a bare `exception` alternation false-matches benign `exception=null` INFO lines.
+- Use `-o default` (keeps the `pod › container` prefix on each match), not `-o raw` (drops it). stern's no-color flag is `--color never`, not `--no-color`.
+- Add `<correlation-id>` / tenant / connection / task terms to the regex once step 4 gives them to you.
+
+Pod LIFECYCLE (a sync spawns `<connId>-...-sync` and, when loading, `target-qlik`/`stitch-orchestrator` pods - none are standing deployments). Name-filter rather than the ~180-pod firehose of `k8s-resources-watch`:
+
+```sh
+/Users/ryl/GitHub/agzam/death-contraptions/tools/monitor/monitor.bb \
+  --source 'kubectl --kubeconfig ~/.kube/<sde> -n default get pods -w -o json' \
+  --jq 'select((.metadata.name // "") | test("stitch|target-qlik|-sync")) | {pod: .metadata.name, phase: .status.phase}' \
+  --live --max-runtime 900
+```
+
+US Stage (no cluster) - Splunk only. Query `:splunk :index` windowed to the endpoint + time from step 4 via `splunk-search`; for a continuous watch, monitor a Splunk CLI stream the same way.
 
 ## 4. Drive the flow and correlate
 
-- Capture network FIRST, then perform the UI steps. The hub is iframe-free at the top level, so standard selectors work. TODO (first-run recon in the dedicated profile): capture exact target specs for the create/reuse-connection dialog and the task run/monitor controls, and re-check connection dialogs and task-detail pages for embedded iframes; record them here.
+- Capture network FIRST (`(browser-repl/capture-net! {:url-filter "/api"})`), then drive. The hub top level is iframe-free, so standard selectors work; navigate by URL. After a click that fires background XHRs, `(browser-repl/wait-networkidle)` before reading.
   - Connections: reuse an existing connection where possible (`/connections/all`); create one only if needed, prefixing its name with `:safety :artifact-prefix`.
   - Tasks: open/run a pipeline project at `/projects/all`; watch state at `/monitoring/all`.
   - Interact with target specs: `(browser-repl/click [:role "button" {:name "..."}])`, `(browser-repl/fill [:label "..."] v)`; read with `(browser-repl/aria "<region>")` and `(browser-repl/texts "<sel>")` instead of full-page dumps.
-- Capture correlation keys from the UI side. Start `(browser-repl/capture-net! {:url-filter "/api/v1"})` before the action, then `(browser-repl/net-where "<endpoint>")` to pull matching entries and their request-side `:correlation-headers` (e.g. `x-request-id`, `traceparent`) plus tenant/connection/task IDs. Feed those exact IDs into the monitor `--regex` and the Splunk query so the backend watcher surfaces only matching lines. This join is the whole point of the dual-agent setup. (Note: vohi `/api/v1` responses carry no `x-request-id`/`traceparent`; capture them from requests, or join on tenant+endpoint+time.)
+- Correlation join: prefer tenant + endpoint + time, NOT a shared request id. Confirmed on vohi: browser requests to `/api/v1/...` carry no `x-request-id`/`traceparent` (`(browser-repl/net-where "<endpoint>")` shows `:headers {}`), and the `traceId` in the stitch logs (e.g. `ae262c2a...`) is injected server-side at the gateway, never reaching the browser. So pull endpoint + timestamp from `net-where`, read the tenant id from the logs, and window the monitor/Splunk query to that endpoint + time. Feed any tenant/connection/task id you DO have (often in the URL or response) into the monitor `--regex`.
+
+Recon (vohi, first run - extend as you learn more):
+- Create -> "Data connection" is a same-page panel (no iframe). It POSTs `/api/v1/data-projects/external-data-provider/source/kinds`, which drives `stitch-menagerie` to `:post /v1/stitch-connections/stitch-access-token` (a real menagerie log line, ~16ms) and `stitch-bobbin` to publish a Solace event. This is the cleanest UI->stitch chain found so far.
+- `/connections/all` and `/create` otherwise hit platform services (`data-connections`, `spaces`, `accesscontrol`), not the stitch services; their `404`s (automl-license, web-notifications, banners) are benign feature-disabled noise.
+- NOT yet iframe-checked: deeper connection-config dialogs and task-detail pages. Verify (`(browser-repl/eval-js "document.querySelectorAll('iframe').length")`) before assuming top-frame selectors there.
 
 ## 5. Safety
 

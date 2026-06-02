@@ -8,7 +8,7 @@ node_modules/
 # Clojure
 .cpcache/
 .clj-kondo/.cache/
-.lsp/cache/
+.lsp/.cache/
 target/
 *.jar
 *.class

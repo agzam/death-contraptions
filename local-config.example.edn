@@ -44,9 +44,13 @@
    :sde-rootadmin {:username "rootadmin" :password "Qlik1234"}}
 
   :defaults
+  ;; error-patterns match the STRUCTURED level (a bare "error"/"exception" false-
+  ;; matches benign lines like exception=null). correlation-headers are often
+  ;; absent on the browser side (Qlik injects trace ids at the gateway) - when
+  ;; empty, the backend watcher joins on tenant+endpoint+time instead.
   {:monitor {:live? true :max-runtime 600 :max-matches 1
              :digest-interval 30 :default-lookback "15m"
-             :error-patterns ["level=error" "panic" " 5\\d\\d "]
+             :error-patterns ["\"level\":\"error\"" "level=error" "\\bpanic:" "stacktrace"]
              :correlation-headers ["x-request-id" "traceparent"]}
    :report  {:format :org :target :org-roam
              :attach-screenshots? true :attach-network? true}

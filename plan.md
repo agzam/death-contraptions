@@ -1,6 +1,7 @@
 # Agentic Browser REPL - Plan & Progress
 
-Status: in progress. This is the single pointer to resume in a fresh session.
+Status: complete - the harness is built, battle-tested, and committed. This file
+is the historical record + resume pointer.
 
 ## Goal
 
@@ -60,6 +61,66 @@ into atoms, download/wait/assert, promesa-wrapped. jxa-browser unchanged.
 
 ## Status
 
+DONE (harness hardening - battle-tested + committed):
+- The nth-quirk was a REAL bug, not the stale-process trap: `eval-code-await`
+  bailed whenever the kickoff returned nbb's spurious "nth not supported"
+  promise-print error - which it ALWAYS does for a promise-bearing form - instead
+  of polling like the launcher deliberately does. Fixed with a
+  `spurious-kickoff-error?` guard: tolerate the quirk and poll; bail only on a
+  REAL up-front compile error. (`client.clj`)
+- nbb classification fixed (`discovery.clj` `classify-repl-type`): nbb's describe
+  reports `versions {"nbb-nrepl" .. "node" ..}` with NO `"nbb"`/`"clojure"` key,
+  so the old `(get versions "nbb")` check left it `:unknown` and auto-await never
+  fired. Now detected -> `cljs-port?` true -> auto-await.
+- Live await integration test (`integration_test.bb`, run `bb itest`): starts a
+  real nbb and asserts sync / async-success / promesa-chain return their values
+  and async-failure surfaces the real message - the round-trip the unit tests
+  never had (it WOULD have caught the regression). Skips if nbb absent.
+- `nrepl-server-info` MCP tool (`server.bb`): git sha + per-source-file mtimes +
+  `stale?` (a file on disk newer than process load) so "stale process vs real
+  bug" is a glance, not mtime/pid forensics.
+- browser-repl `wait-load`/`wait-networkidle` (page lifecycle; `wait-for` is
+  target-only) + a port REGISTRY: `launch.bb` advertises to `~/.cache/nrepl-ports/`
+  (`$NREPL_MCP_PORT_DIR`) and `discovery.clj` scans it, so the MCP auto-discovers
+  a session in a sibling repo.
+- Skills corrected (qlik-verify + browser-repl): keycloak `#username`/`#password`/
+  `#kc-login`; stern `-o default --color never`; tenant+endpoint+time as the
+  PRIMARY correlation join (browser request headers are `{}`); mixed-format
+  monitor filter recipe; kube-context->current-context fallback; name-filtered
+  pod-lifecycle watch; the connection-flow recon.
+- Green: nrepl 38/92 unit + 1/13 integration, browser-repl 6/25; kondo clean
+  (the `load-file` test-script "errors" are the repo's existing convention).
+- VERIFIED LIVE (after a reload): `nrepl-server-info` `stale? false`, then
+  correctly flipped `true` after a later `server.bb` edit; a failing click =
+  real error + `*e`; nbb classifies (63456/50323 -> nbb); a bare eval with no
+  `:port`/`:await` returns the value (auto-discover + auto-await); registry
+  discovery (project-root = the registry dir); `wait-load`/`wait-networkidle`;
+  corrected keycloak ids re-login.
+- MORE gaps found + fixed while battle-testing:
+  - a browser closed underneath the session wedged it (`started?` lied) ->
+    `started?`/`pg!`/`status` are liveness-aware (`page-live?` checks
+    `.isClosed`), `start!` drops dead handles and relaunches; `:fresh`
+    auto-recovers, a `:persistent` zombie surfaces an actionable profile-lock
+    error (kill the launcher + relaunch). (browser_repl.cljs)
+  - `bb itest` ran nbb in tools/browser-repl, clobbering the real session's
+    `.nrepl-port` + leaving stale debris -> it runs in a throwaway temp dir now.
+  - a stale/unreachable port file blocked auto-discovery -> `single-live-port`
+    counts only CONNECTED ports (server.bb, unit-tested).
+  - the launcher wrote `.nrepl-port` into its CWD (e.g. the qlik-trial repo
+    root) -> defaults to the tool dir now; the registry handles cross-repo
+    discovery (launch.bb; validated: launched from qlik-trial, repo stayed clean).
+  - the `monitor` tool forked jq PER LINE, so multi-line JSON (kubectl/stern
+    -o json) silently never matched - every k8s `--jq` watch saw nothing. Now
+    pipes the source through ONE streaming `jq -c --unbuffered` (parses
+    multi-line values); validated live (the pod-lifecycle recipe now streams
+    stitch pods). (monitor.bb + monitor/qlik-verify skills; monitor suite 17/73)
+- Environmental notes (not reproduced on a clean relaunch): a persistent
+  relaunch immediately after an unclean crash can transiently wedge the nbb
+  (chromium restore-state), and a crashed session can lose the persisted login
+  (cookies not flushed before the crash).
+- NOTE: `single-live-port` (GAP C) is unit-tested; its live effect loads on the
+  next MCP reload, and is inert until there is stale port debris anyway.
+
 DONE (committed):
 - nrepl MCP async upgrade: `client.clj` `eval-code-await` + `await-kickoff-code`;
   `server.bb` `await` arg + `cljs-port?` auto-detect (via discovery cache) +
@@ -111,12 +172,6 @@ clean restart to load the new code).
 UNCOMMITTED, separate repo: `awesome-qlik-ai/mcp/assessments/playwright-mcp.md`
 (goes via that repo's branch/PR workflow, not a direct main commit).
 
-PROTOTYPE (scratch, not committed): `~/.cache/qlik-verify/nbb-proto/` - `nre.bb`
-(bb nREPL client with `--await`), `FINDINGS.md`. Proved nbb+Playwright+nREPL
-liveness, token economy (20 connection names in 534 chars vs a multi-KB
-snapshot), live response capture (37 `/api/v1` responses into an atom). A live
-nbb nREPL may still be running on port 4321 (ephemeral bg job).
-
 DONE:
 4. browser-repl skill - `skills/browser-repl/SKILL.md`: tool routing
    (jxa/Playwright/nbb-REPL), launch + modes, `nrepl-eval` driving (`:port` +
@@ -138,6 +193,9 @@ NEXT (tasks 5-6):
 ## Hard-won facts & gotchas (do not relearn)
 
 - nbb nREPL returns promises, not values -> `eval-code-await` wraps + polls.
+- nbb's `describe` reports `versions {"nbb-nrepl" {..} "node" {..}}` - NO `"nbb"`
+  or `"clojure"` key. Classify off `nbb-nrepl`/`node` (`discovery/classify-repl-type`),
+  else `cljs-port?` is false and auto-await silently never fires.
 - nbb's SCI nREPL has NO `load-file`. Load the stdlib with `(require '[browser-repl])`
   (nbb runs in the tool dir whose `nbb.edn` puts `.` on :paths). The launcher does this.
 - `require`/loading an npm-module-bearing ns (playwright) is ASYNC over nREPL
@@ -146,13 +204,13 @@ NEXT (tasks 5-6):
 - nbb writes its own `.nrepl-port` in its CWD on startup. nbb+playwright TRAP
   SIGTERM to close chromium gracefully and can outlive a plain `.destroy`; tear
   the whole descendant tree down (SIGTERM, brief grace, then SIGKILL survivors).
-- nrepl MCP auto-discovery only finds `.nrepl-port` in an ANCESTOR of the MCP's
-  CWD (the FIRST ECA workspace root, e.g. qlik-trial). A port file in a sibling
-  repo is NOT found. Either pass `:port` + `:await true` to `nrepl-eval`
-  explicitly (reliable), or `launch.bb --port-file-dir <that ancestor>`. Verified
-  live: `nrepl-list-ports` saw nothing for a death-contraptions port while the
-  MCP ran from qlik-trial; explicit `:port` + `:await true` drove it end-to-end
-  (HN: 30 stories extracted, net-summary {200 7}, scoped aria) through the MCP.
+- nrepl MCP auto-discovery walks UP from the MCP's CWD (the FIRST ECA workspace
+  root, e.g. qlik-trial) for `.nrepl-port`, so a port file in a sibling repo is
+  NOT found that way. NOW ALSO scans a flat REGISTRY dir (`~/.cache/nrepl-ports/`,
+  `$NREPL_MCP_PORT_DIR`) that `launch.bb` advertises its port into - so a
+  browser-repl session in any repo is auto-discoverable once the MCP has the
+  discovery fix loaded. Explicit `:port` + `:await true` stays the reliable
+  default (and the only option until the MCP reloads the fix).
 - nbb/SCI `*1`/`*2`/`*3`/`*e` are GLOBAL across nREPL sessions, NOT per-session
   (verified: cloning a session does not isolate them). So poll-driven await
   cannot keep `*2`/`*3` clean (every poll eval shifts the one global history) -
@@ -166,14 +224,18 @@ NEXT (tasks 5-6):
   `*1`). Throw a FRESH `js/Error` carrying `(.-message *nre-err*)`, NOT the raw
   rejection: throwing a host error class (e.g. Playwright's TimeoutError) trips
   nbb's "nth not supported" printer quirk and loses the message; the original
-  stays in `*nre-err*`. Validated via the bencode proto client on the live nbb:
+  stays in `*nre-err*`. Validated on the live nbb:
   failing click -> real "locator.click: Timeout..." + call log, `*e` =
   ex-message; `(p/resolved 42)` -> 42 + `*1`; sync `(throw ...)` -> surfaced.
 - "nth not supported on this type function(a,b,c,d){this.cc=a;this.name=b;...}"
-  on a SUCCESS-path async eval is the tell that the result is a RAW (un-awaited)
-  promesa promise being printed (G/O bitmasks => a cljs type, not a JS error) -
-  i.e. the MCP is running `eval-code`, not `eval-code-await`. Means await isn't
-  active: stale server.bb, or `await` arg not honored + `cljs-port?` false.
+  is nbb's SPURIOUS print of any promise-bearing eval (G/O bitmasks => a cljs
+  type). The await KICKOFF always produces a promise, so it ALWAYS trips this -
+  even when its `do` returns a plain keyword (verified). The launcher/proto
+  client tolerate it by ignoring the kickoff result and polling; `eval-code-await`
+  now does the same (`spurious-kickoff-error?`). If you STILL see it on a
+  `:await true` call: either await was omitted, or the MCP serves stale code ->
+  call `nrepl-server-info` (`stale? true` => reload). It is NOT proof of the
+  stale-process trap - this session it was a real bug in fresh code.
 - ECA "reload" of an MCP can RECONNECT to a still-alive stale process instead of
   restarting it, so client.clj/server.bb edits silently DON'T take effect (you
   keep getting old behavior though disk is new). Tell: multiple `eca server`
@@ -190,17 +252,21 @@ NEXT (tasks 5-6):
 - `allowed-origins` must include `https://*.qlikcloud.com` (the CDN import-map
   the hub bootstraps from) plus `*.qlikdev.com`, `*.qlik.com`, `*.qlik-stage.com`.
   Narrower and the hub hangs on its loader.
-- SDE login: keycloak at `keycloak.<sde>.pte.qlikdev.com`, creds
-  `rootadmin` / `Qlik1234`; getByRole locators work ("Username or email",
-  "Password", "Sign In").
+- SDE login: keycloak at `keycloak.<sde>.pte.qlikdev.com` (title "Sign in to
+  Qlik"). Fill by ID - `#username`, `#password`, submit `#kc-login` - the
+  `[:label ..]`/getByRole specs the skill once listed were unreliable for this
+  theme. Creds from the env's `:credentials` if present, else the SDE default
+  `rootadmin` / `Qlik1234` (vohi stores none: `:has-credentials false`).
 - US Stage login routes through `login-staging.qlik.com` OAuth (likely SSO/MFA)
   -> use a persistent profile, manual login once.
 - vohi DI hub is iframe-free at the top level; routes are deep-linkable:
   `/data-integration/{home,create,catalog/all,connections/all,projects/all,monitoring/all,...}`.
-- Correlation: vohi `/api/v1` RESPONSE headers carry no `x-request-id` /
-  `traceparent` (only `qlik-api-version`, `x-envoy-upstream-service-time`). The
-  join key must come from REQUEST headers (`.on page "request"`) or
-  tenant+endpoint+time.
+- Correlation: cross-layer ID join does NOT work on vohi - confirmed both ways.
+  Responses carry no `x-request-id`/`traceparent`, and the captured REQUEST
+  headers are `{}` too (`net-where` shows it): the `traceId` in stitch logs
+  (e.g. `ae262c2a...`) is injected server-side at the gateway and never reaches
+  the browser. PRIMARY join = tenant + endpoint + time. The dual-agent setup is
+  still valuable, just on a time/endpoint window, not a shared id.
 - nbb's playwright pinned chromium-1223 (install via
   `node_modules/.bin/playwright install chromium`); the MCP used the chrome
   channel.
@@ -210,8 +276,13 @@ NEXT (tasks 5-6):
 
 ## File map
 
-- `death-contraptions/tools/nrepl/` - upgraded nrepl MCP (`eval-code-await`;
-  `await`/`cljs-port?`).
+- `death-contraptions/tools/nrepl/` - the nrepl MCP. `client.clj` `eval-code-await`
+  (spurious-kickoff tolerant); `discovery.clj` `classify-repl-type` (nbb) +
+  `registry-port-files`; `server.bb` `await`/`cljs-port?` + `nrepl-server-info`
+  tool; `server_test.bb` unit tests; `integration_test.bb` (`bb itest`) live nbb
+  round-trip.
+- `~/.cache/nrepl-ports/` - flat port registry launchers advertise into so the
+  MCP auto-discovers sessions outside its CWD subtree (`$NREPL_MCP_PORT_DIR`).
 - `death-contraptions/tools/browser-repl/` - the nbb-REPL powerhouse:
   `browser_repl.cljs` stdlib + `launch.bb` launcher + `nbb.edn`/`package.json`
   + `bb.edn`/`run_tests.bb`/`launch_test.bb`. Pinned local nbb+playwright.
@@ -223,7 +294,6 @@ NEXT (tasks 5-6):
 - `death-contraptions/local-config.example.edn` - `:servers` (incl. `:nrepl`) +
   `:qlik-verify` schema.
 - `death-contraptions/{bb.edn,run_tests.bb,setup_test.bb}` - root setup tests.
-- `~/.cache/qlik-verify/nbb-proto/` - prototype (`nre.bb`, `FINDINGS.md`).
 - `awesome-qlik-ai/mcp/assessments/playwright-mcp.md` - security assessment for
   the now-removed Playwright MCP (historical; separate repo).
 
@@ -237,14 +307,19 @@ NEXT (tasks 5-6):
 
 ## How to resume
 
-Point a fresh session at this file. Tasks 3-5 are DONE: browser-repl tool +
-skill built (committed `9c4e4fa`), nrepl-mcp await fidelity fix (committed
-`2fc5635`), and the Playwright MCP removed + qlik-verify migrated to browser-repl
-(uncommitted as of writing). The nrepl MCP fidelity fix needs a clean ECA restart
-to actually take effect (stale-process trap, see gotchas).
+The harness is complete and committed; this file is the historical record. The
+await nth-quirk was a real `eval-code-await` bug (fixed + guarded by `bb itest`),
+nbb classifies correctly (auto-await), and there is a `nrepl-server-info`
+staleness probe, a port registry, `wait-load`/`wait-networkidle`,
+closed-session recovery, and a monitor that streams multi-line JSON - all
+validated live.
 
-NEXT: commit the Playwright-removal + qlik-verify migration; run `bb setup.bb` to
-propagate the skills/config; then task 6 - validate e2e on vohi via plain
-`nrepl-eval`. Drive a session: `bb tools/browser-repl/launch.bb --mode fresh`,
-then `nrepl-eval` (`:port <printed> :await true`): `(require '[browser-repl :as b])`,
-`(b/goto ...)`, `(b/aria)`, etc.
+To USE it: start a session with `bb tools/browser-repl/launch.bb --mode
+persistent --user-data-dir ~/.cache/qlik-verify/chrome-profile`, then drive via
+`nrepl-eval` (the launcher advertises its port to the registry, so a bare eval
+auto-discovers + auto-awaits; pass `:port` + `:await true` explicitly if you
+prefer). See the browser-repl and qlik-verify skills.
+
+Still deliberate (side effects, run by hand): `bb setup.bb` to propagate the
+corrected skills + config to the consumers (rewrites desktop/copilot configs,
+pushes to claude.ai). The branch is ahead of origin and NOT pushed.
