@@ -214,6 +214,21 @@
        " *nre-val*))"))
 (def ^:private await-pending-value ":nre/await-pending")
 
+;; nbb's nREPL emits a spurious "nth not supported on this type ..." error
+;; whenever an eval PRODUCES a promise - even when the form's own value is a
+;; plain keyword (verified: `(do (-> (p/resolved 5) (p/then inc)) :kicked)`
+;; trips it). The kickoff always produces a promise, so it ALWAYS trips this,
+;; yet its side effects (the *nre-* defs) still run. The launcher (launch.bb)
+;; handles this by ignoring the kickoff result and
+;; polling the side-effect vars; we do the same. A kickoff error WITHOUT this
+;; signature is a genuine up-front compile/eval failure we must surface.
+(defn spurious-kickoff-error?
+  "True when a kickoff result carries nbb's promise-print quirk rather than a
+   real compile error. Pure."
+  [result]
+  (str/includes? (str (:err result) " " (:ex result) " " (:root-ex result))
+                 "nth not supported"))
+
 (defn eval-code-await
   "Evaluate CODE on a cljs/nbb nREPL and resolve its promise before returning,
    with real-REPL fidelity: the resolved value becomes *1, while a failure
@@ -224,8 +239,10 @@
   (let [ev (fn [c tmo] (eval-code {:host host :port port :code c :session session :ns ns :timeout-ms tmo}))]
     (ev await-require 5000)
     (let [kicked (ev (await-kickoff-code code) 10000)]
-      (if (some? (:ex kicked))
-        kicked                                  ;; CODE failed to compile/eval up front
+      ;; Bail only on a REAL up-front failure; nbb's spurious promise-print
+      ;; quirk is expected here (side effects ran) - poll the sentinels instead.
+      (if (and (some? (:ex kicked)) (not (spurious-kickoff-error? kicked)))
+        kicked
         (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
           (loop []
             (let [r (ev await-poll-form 5000)]

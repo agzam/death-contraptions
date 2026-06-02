@@ -4,10 +4,11 @@ MCP server connecting LLMs to Clojure/ClojureScript REPLs via nREPL. Supports cl
 
 Babashka + built-in bencode. No external deps.
 
-## Tools (2)
+## Tools (3)
 
-- `nrepl-eval` - eval Clojure code. Auto-discovers port. Persistent sessions. Delimiter repair.
+- `nrepl-eval` - eval Clojure code. Auto-discovers port. Persistent sessions. Delimiter repair. Awaits cljs/nbb promises (`:await`, auto for nbb/shadow ports).
 - `nrepl-list-ports` - discover running nREPLs with type detection.
+- `nrepl-server-info` - the loaded-code fingerprint (git sha, per-source mtimes, `stale?`) so a stale process is distinguishable from a real bug at a glance.
 
 For doc lookup use `(doc sym)` or `(-> 'sym resolve meta)` via eval. For loading files use `(load-file "path")` via eval.
 
@@ -29,7 +30,7 @@ npx shadow-cljs server
 
 ## Port discovery
 
-Walks CWD upward for `.nrepl-port` and `.shadow-cljs/nrepl.port`. When exactly one port is found, `nrepl-eval` uses it automatically. Results cached for 30s; `nrepl-list-ports` always scans fresh.
+Walks CWD upward for `.nrepl-port` and `.shadow-cljs/nrepl.port`, AND scans a flat registry dir (`~/.cache/nrepl-ports/`, override `$NREPL_MCP_PORT_DIR`) that out-of-tree launchers (e.g. browser-repl) advertise into - so a session in a sibling repo is still found. When exactly one CONNECTED port is discovered, `nrepl-eval` uses it automatically; stale/unreachable port files are ignored so leftover debris cannot make discovery ambiguous. Results cached for 30s; `nrepl-list-ports` always scans fresh.
 
 ## Persistent connections
 

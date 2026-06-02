@@ -1,3 +1,5 @@
 {:paths ["." "src"]
- :tasks {test {:doc  "Run tests"
-               :task (load-file "run_tests.bb")}}}
+ :tasks {test  {:doc  "Run unit tests"
+                :task (load-file "run_tests.bb")}
+         itest {:doc  "Run live nbb await integration tests (needs nbb in tools/browser-repl)"
+                :task (shell "bb integration_test.bb")}}}

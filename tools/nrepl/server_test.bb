@@ -54,12 +54,16 @@
     (if (wait-for-port port 5000)
       (binding [*nrepl-port* port
                 *nrepl-dir* (.getAbsolutePath tmpdir)]
-        (try (f)
-             (finally
-               (.destroyForcibly (:proc proc))
-               (client/close-connection! "localhost" port)
-               (.delete port-file)
-               (.delete tmpdir))))
+        ;; isolate discovery from the user's real ~/.cache/nrepl-ports so a live
+        ;; browser-repl session can't perturb the port-count assertions
+        (with-redefs [discovery/default-registry-dir
+                      (constantly (str (.getAbsolutePath tmpdir) "/no-registry"))]
+          (try (f)
+               (finally
+                 (.destroyForcibly (:proc proc))
+                 (client/close-connection! "localhost" port)
+                 (.delete port-file)
+                 (.delete tmpdir)))))
       (do (.destroyForcibly (:proc proc))
           (.delete port-file)
           (.delete tmpdir)
@@ -80,8 +84,9 @@
 (deftest handle-request-tools-list-test
   (let [resp (handle-request {"id" 2 "method" "tools/list" "params" {}})
         tools (get-in resp [:result :tools])]
-    (is (= 2 (count tools)))
-    (is (= #{"nrepl-eval" "nrepl-list-ports"} (set (map :name tools))))))
+    (is (= 3 (count tools)))
+    (is (= #{"nrepl-eval" "nrepl-list-ports" "nrepl-server-info"}
+           (set (map :name tools))))))
 
 (deftest handle-request-notification-test
   (is (nil? (handle-request {"method" "notifications/initialized"}))))
@@ -177,6 +182,18 @@
       (is (str/includes? pf ".-message *nre-err*"))
       (is (str/includes? pf "*nre-val*")))))
 
+(deftest spurious-kickoff-error-test
+  (testing "nbb's promise-print quirk is tolerated; real compile errors are not"
+    ;; the quirk appears in :err and/or :ex - either signals 'poll anyway'
+    (is (client/spurious-kickoff-error?
+         {:err "nth not supported on this type function(a,b,c,d){...}"}))
+    (is (client/spurious-kickoff-error?
+         {:ex "nth not supported on this type function(a,b,c,d){...}"}))
+    ;; a genuine up-front failure must NOT be mistaken for the quirk
+    (is (not (client/spurious-kickoff-error?
+              {:ex "clojure.lang.ExceptionInfo" :err "Unable to resolve symbol: foo"})))
+    (is (not (client/spurious-kickoff-error? {:value "42"})))))
+
 (deftest cljs-port-detection-test
   (testing "cljs-port? reflects the discovery cache repl type"
     (reset! discovery-cache {:ports [{:port 7001 :type :nbb}
@@ -185,6 +202,61 @@
     (is (false? (cljs-port? 7002)))
     (is (false? (cljs-port? 9999)))
     (invalidate-discovery-cache!)))
+
+(deftest classify-repl-type-test
+  (testing "nbb is detected from its real describe shape (nbb-nrepl + node, no clojure)"
+    ;; this exact map is what an nbb nREPL returns; the old (get versions \"nbb\")
+    ;; check missed it and left auto-await off
+    (is (= :nbb (discovery/classify-repl-type
+                 {"nbb-nrepl" {"major" "TODO" "version-string" "TODO"}
+                  "node" {"major" "v24" "version-string" "v24.9.0"}})))
+    (is (= :nbb (discovery/classify-repl-type {"node" {"major" "v22"}})))
+    (is (= :nbb (discovery/classify-repl-type {"nbb" {"version-string" "1.3.0"}}))))
+  (testing "other runtimes still classify correctly; shadow wins over node"
+    (is (= :shadow-cljs (discovery/classify-repl-type {"shadow-cljs" {} "node" {} "clojure" {}})))
+    (is (= :bb  (discovery/classify-repl-type {"babashka" {"version-string" "1.3"}})))
+    (is (= :clj (discovery/classify-repl-type {"clojure" {"version-string" "1.11"}})))
+    (is (= :unknown (discovery/classify-repl-type {"weird" {}})))
+    (is (= :unknown (discovery/classify-repl-type nil)))))
+
+(deftest source-staleness-test
+  (testing "a source file newer than load marks stale?"
+    (let [r (source-staleness 1000 [["a.clj" 2000] ["b.clj" 500]])]
+      (is (true? (:stale? r)))
+      (is (= [{:file "a.clj" :mtime 2000 :newer-than-load? true}
+              {:file "b.clj" :mtime 500 :newer-than-load? false}]
+             (:files r)))))
+  (testing "older/equal/missing mtimes => not stale (nil tolerated)"
+    (is (false? (:stale? (source-staleness 3000 [["a" 1000] ["b" nil]]))))
+    (is (false? (:stale? (source-staleness 3000 [["a" 3000]]))))))
+
+(deftest registry-port-files-test
+  (testing "reads bare port numbers from *.port files in a flat registry dir"
+    (let [dir (io/file (System/getProperty "java.io.tmpdir")
+                       (str "nrepl-reg-" (System/currentTimeMillis)))]
+      (.mkdirs dir)
+      (try
+        (spit (io/file dir "browser-repl-65432.port") "65432")
+        (spit (io/file dir "ignored.txt") "99999")
+        (let [found (discovery/registry-port-files (.getAbsolutePath dir))]
+          (is (= [65432] (mapv :port found)) "only .port files, parsed to ints")
+          (is (= (.getAbsolutePath dir) (:project-root (first found)))))
+        (finally
+          (doseq [f (.listFiles dir)] (.delete f))
+          (.delete dir)))))
+  (testing "a missing registry dir is empty, not an error"
+    (is (= [] (discovery/registry-port-files "/no/such/dir/really-xyz")))))
+
+(deftest single-live-port-test
+  (testing "stale/unreachable debris does not block auto-discovery of the one live port"
+    (is (= 7001 (single-live-port [{:port 7001 :status :connected}
+                                   {:port 9999 :status :unreachable}])))
+    (is (= 7001 (single-live-port [{:port 7001 :status :connected}]))))
+  (testing "nil when none live or ambiguous (>1 live)"
+    (is (nil? (single-live-port [{:port 9999 :status :unreachable}])))
+    (is (nil? (single-live-port [])))
+    (is (nil? (single-live-port [{:port 7001 :status :connected}
+                                 {:port 7002 :status :connected}])))))
 
 (deftest eval-mcp-roundtrip-test
   (let [resp (handle-request

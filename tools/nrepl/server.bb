@@ -5,6 +5,8 @@
 
 (require '[cheshire.core :as json]
          '[clojure.string :as str]
+         '[clojure.java.io :as io]
+         '[clojure.java.shell :as shell]
          '[nrepl-mcp.client :as client]
          '[nrepl-mcp.discovery :as discovery]
          '[nrepl-mcp.sessions :as sessions]
@@ -42,8 +44,18 @@
         (sessions/get-session! "localhost" port)
         (catch Exception _)))))
 
+(defn single-live-port
+  "The one port to auto-use, or nil if there are none or it's ambiguous. Counts
+   only CONNECTED ports, so a stale/unreachable .nrepl-port (debris from a
+   crashed nbb or a clobbered tool dir) does not block auto-discovery of the one
+   live REPL. Pure."
+  [ports]
+  (let [live (filter #(= :connected (:status %)) ports)]
+    (when (= 1 (count live))
+      (:port (first live)))))
+
 (defn- cached-discover-port
-  "Return a single auto-discovered port, using a 30s cache to avoid
+  "Return a single auto-discovered (live) port, using a 30s cache to avoid
    filesystem walks + socket probes on every eval."
   []
   (let [now (System/currentTimeMillis)
@@ -54,8 +66,7 @@
                   (reset! discovery-cache {:ports fresh :ts now})
                   (warmup-ports! fresh)
                   fresh))]
-    (when (= 1 (count ports))
-      (:port (first ports)))))
+    (single-live-port ports)))
 
 (defn invalidate-discovery-cache! []
   (reset! discovery-cache nil))
@@ -67,6 +78,59 @@
   (boolean (some (fn [p] (and (= port (:port p))
                               (#{:nbb :shadow-cljs} (:type p))))
                  (:ports @discovery-cache))))
+
+;; ---------------------------------------------------------------------------
+;; Loaded-code fingerprint - so "is the MCP serving stale source?" is a glance,
+;; not mtime/pid forensics. (This session we mistook a real await bug for the
+;; stale-process trap; this makes the distinction cheap.)
+;; ---------------------------------------------------------------------------
+
+(def ^:private loaded-at-ms (System/currentTimeMillis))
+
+(def ^:private tool-dir
+  ;; abs path to this tool's dir, derived from the launched server.bb file
+  (some-> (System/getProperty "babashka.file") io/file .getCanonicalFile .getParentFile str))
+
+(def ^:private loaded-source-files
+  ["server.bb" "src/nrepl_mcp/client.clj" "src/nrepl_mcp/discovery.clj"
+   "src/nrepl_mcp/sessions.clj" "src/nrepl_mcp/delimiters.clj"])
+
+(defn source-staleness
+  "Given the process load time (ms) and a seq of [name mtime-ms] for the loaded
+   source files, mark which are newer than the load and whether ANY is. Pure -
+   this is the staleness signal a reload is supposed to clear."
+  [loaded-ms files]
+  (let [marked (mapv (fn [[nm mt]]
+                       {:file nm :mtime mt
+                        :newer-than-load? (boolean (and mt (< loaded-ms mt)))})
+                     files)]
+    {:stale? (boolean (some :newer-than-load? marked))
+     :files  marked}))
+
+(defn- file-mtime [path]
+  (let [f (io/file path)] (when (.exists f) (.lastModified f))))
+
+(defn- git-sha [dir]
+  (try
+    (let [{:keys [exit out]} (shell/sh "git" "-C" (str dir) "rev-parse" "--short" "HEAD")]
+      (when (zero? exit) (str/trim out)))
+    (catch Exception _ nil)))
+
+(defn- iso [ms] (when ms (str (java.time.Instant/ofEpochMilli ms))))
+
+(defn server-info-report
+  "Fingerprint of the running server: loaded-at, git sha, and per-source-file
+   mtimes flagged when newer than load (= edited on disk but not reloaded)."
+  []
+  (let [mtimes (for [rel loaded-source-files]
+                 [rel (file-mtime (io/file tool-dir rel))])
+        {:keys [stale? files]} (source-staleness loaded-at-ms mtimes)]
+    {:server     server-info
+     :source-dir tool-dir
+     :git-sha    (git-sha tool-dir)
+     :loaded-at  (iso loaded-at-ms)
+     :stale?     stale?
+     :files      (mapv #(-> % (update :mtime iso)) files)}))
 
 ;; ---------------------------------------------------------------------------
 ;; Tool definitions - intentionally minimal for token efficiency.
@@ -103,6 +167,11 @@
     :properties {:start_dir {:type "string"
                              :description "Directory to scan from (default: cwd)."}}
     :required []}})
+
+(def nrepl-server-info-tool
+  {:name "nrepl-server-info"
+   :description "Report this nREPL MCP's loaded-code fingerprint: git sha, when it loaded, and whether any source file on disk is newer than the running process (stale? true => reload the MCP to pick up edits). Use to tell a stale process apart from a real bug."
+   :inputSchema {:type "object" :properties {} :required []}})
 
 ;; ---------------------------------------------------------------------------
 ;; Tool handlers
@@ -222,6 +291,12 @@
                                             port (name type) (name status)
                                             (or project-root "?"))))}]})))
 
+(defn server-info-handler
+  "Handler for nrepl-server-info: the loaded-code fingerprint as pretty JSON."
+  [_]
+  {:content [{:type "text"
+              :text (json/generate-string (server-info-report) {:pretty true})}]})
+
 ;; ---------------------------------------------------------------------------
 ;; MCP JSON-RPC dispatch
 ;; ---------------------------------------------------------------------------
@@ -239,7 +314,7 @@
 
     "tools/list"
     {:jsonrpc "2.0" :id id
-     :result {:tools [nrepl-eval-tool nrepl-list-ports-tool]}}
+     :result {:tools [nrepl-eval-tool nrepl-list-ports-tool nrepl-server-info-tool]}}
 
     "tools/call"
     (let [{tool "name" args "arguments"} params]
@@ -247,6 +322,7 @@
        :result (case tool
                  "nrepl-eval" (eval-nrepl args)
                  "nrepl-list-ports" (list-ports args)
+                 "nrepl-server-info" (server-info-handler args)
                  {:content [{:type "text" :text (str "Unknown tool: " tool)}]
                   :isError true})})
 
