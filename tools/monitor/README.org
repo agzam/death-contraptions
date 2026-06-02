@@ -17,7 +17,7 @@ monitor.bb --source <shell-cmd>
 | Flag                    | Required   | Purpose                                                                                                                                                                   |
 |-------------------------+------------+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | ~--source <cmd>~          | yes        | Long-running producer. Runs under ~sh -c <cmd>~; monitor shutdown destroys the whole descendant tree (no orphan children).                                                  |
-| ~--jq <expr>~             | one filter | jq expression per line. Match = jq stdout is non-empty and not literal ~null~; the jq output is emitted. Selection and reshape in one expression.                           |
+| ~--jq <expr>~             | one filter | jq filter over the source as a STREAM (piped through ~jq -c --unbuffered~), so multi-line JSON (kubectl/stern ~-o json~) parses. Non-empty, non-~null~ result is a match and is emitted. Selection + reshape in one expression.                           |
 | ~--regex <pattern>~       | one filter | Java regex on the raw line. Matching line is emitted verbatim.                                                                                                            |
 | ~--grep <substring>~      | one filter | Literal substring match. Matching line is emitted verbatim.                                                                                                               |
 | ~--live~                  | no         | Push each match into the active ECA chat via ~emacsclient~ so the agent wakes per match. Requires an Emacs server and ~emacsclient~ on PATH.                                  |
@@ -291,10 +291,10 @@ Kubernetes streaming commands (~kubectl -w -o json~, ~stern~) are already line-b
 
 * ~--jq~ notes
 
+- The source is piped through ONE streaming ~jq -c --unbuffered <expr>~, so a sequence of JSON values parses - INCLUDING multi-line ones. ~kubectl -w -o json~ and ~stern -o json~ stream individual multi-line objects; both work (do NOT pre-compact to ND-JSON). ~kubectl -o json~ without ~--watch~ is a single outer ~List~ document, so use ~--watch~ (streams items) or select ~.items[]~.
 - Selection and reshape share one expression. ~select(cond) | {...}~ both filters and projects.
-- Input must be one JSON value per line (ND-JSON). ~kubectl -o json --watch~ produces that; ~kubectl -o json~ without ~--watch~ produces a single outer document, which does not stream.
-- A literal ~null~ output is treated as no-match.
-- Forks ~jq~ once per input line. Plenty for event streams; for very chatty log tails prefer ~--regex~.
+- A literal ~null~ result is treated as no-match.
+- A stream parse error aborts jq, so keep selects null-safe (~(.metadata.name // "")~) and use ~--regex~/~--grep~ for mixed text / non-JSON streams.
 
 * Non-goals for now
 
@@ -308,7 +308,6 @@ Deliberately omitted to keep the surface small. Add only when real usage proves 
 - ~--idle-match-timeout SEC~ - exit if no match has fired in N seconds (distinct from ~--max-runtime~; counter resets on each match).
 - ~--source-stall-timeout SEC~ - exit if the source has written no line (matched or not) in N seconds. Detects stuck/dead sources.
 - ~--on-match-elisp <template>~ - generic elisp injection per match (more flexible than the hardcoded ~eca-chat-send-prompt~ wrapper that ~--live~ uses).
-- Persistent ~jq~ process to amortize fork cost on high-throughput streams.
 
 * Prerequisites
 

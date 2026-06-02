@@ -206,25 +206,22 @@
     (is (= "a.b" (match-grep "." "a.b")))
     (is (nil? (match-grep "." "abc")))))
 
-(deftest match-jq-behavior
-  (if-not (which "jq")
-    (println "match-jq-behavior: jq not on PATH, skipping")
-    (do
-      (testing "select matches emit the selected value"
-        (is (= "{\"type\":\"Warning\"}"
-               (match-jq "select(.type == \"Warning\")"
-                         "{\"type\":\"Warning\"}"))))
-      (testing "select mismatches produce no match"
-        (is (nil? (match-jq "select(.type == \"Warning\")"
-                            "{\"type\":\"Normal\"}"))))
-      (testing "select+reshape combines selection and projection"
-        (is (= "{\"r\":\"Bad\"}"
-               (match-jq "select(.type == \"Warning\") | {r: .reason}"
-                         "{\"type\":\"Warning\",\"reason\":\"Bad\"}"))))
-      (testing "literal null output does not count as a match"
-        (is (nil? (match-jq "null" "{\"x\":1}"))))
-      (testing "jq error on a line is treated as no-match, not a crash"
-        (is (nil? (match-jq "select(.type == \"x\")" "not-json")))))))
+(deftest sh-squote-escapes
+  (is (= "'abc'" (sh-squote "abc")))
+  (testing "embedded single quote is closed/escaped/reopened for sh"
+    (is (= "'a'\\''b'" (sh-squote "a'b")))))
+
+(deftest effective-source-builds-jq-pipe
+  (testing "non-jq filters run the source unchanged"
+    (is (= "tail -f log"
+           (effective-source {:source "tail -f log" :filter-type :regex :filter-expr "x"})))
+    (is (= "tail -f log"
+           (effective-source {:source "tail -f log" :filter-type :grep :filter-expr "x"}))))
+  (testing ":jq pipes the source through one streaming jq (so multi-line JSON parses)"
+    (is (= "kubectl get pods -w -o json | jq -c --unbuffered 'select(.kind==\"Pod\")'"
+           (effective-source {:source "kubectl get pods -w -o json"
+                              :filter-type :jq
+                              :filter-expr "select(.kind==\"Pod\")"})))))
 
 (deftest make-matcher-dispatch
   (testing "regex spec"
@@ -233,4 +230,10 @@
       (is (nil? (f "bar")))))
   (testing "grep spec"
     (let [f (make-matcher {:filter-type :grep :filter-expr "foo"})]
-      (is (= "foobar" (f "foobar"))))))
+      (is (= "foobar" (f "foobar")))))
+  (testing "jq spec passes jq result lines, drops empty/null (jq pre-applied in effective-source)"
+    (let [f (make-matcher {:filter-type :jq :filter-expr "anything"})]
+      (is (= "{\"a\":1}" (f "{\"a\":1}")))
+      (is (nil? (f "null")))
+      (is (nil? (f "   ")))
+      (is (nil? (f ""))))))

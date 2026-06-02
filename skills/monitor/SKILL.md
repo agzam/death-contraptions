@@ -92,9 +92,11 @@ Always kill monitors you started. They do not auto-stop when the source is long-
 
 | Source output               | Filter                                  |
 |-----------------------------|-----------------------------------------|
-| ND-JSON (e.g. `kubectl -w -o json`, `stern -o json`) | `--jq` with `select(cond) \| {reshape}` |
+| JSON value stream, incl. multi-line (`kubectl -w -o json`, `stern -o json`) | `--jq` with `select(cond) \| {reshape}` |
 | Plain text logs             | `--regex` (anchored patterns, alternations) |
 | Plain text, simple keyword  | `--grep` (literal substring, no regex escaping) |
+
+`--jq` pipes the source through one streaming `jq -c --unbuffered`, so multi-line JSON values parse fine (do NOT pre-compact to ND-JSON). A stream parse error aborts jq, so for mixed text/non-JSON streams use `--regex`/`--grep`, and make selects null-safe (`(.metadata.name // "")`) so a stray object cannot kill the watch.
 
 With `--jq`, combine selection and projection in one expression so emissions are compact:
 
@@ -141,7 +143,7 @@ select(.type == "Warning") | {ns: .involvedObject.namespace, kind: .involvedObje
 
 ## Buffering caveat
 
-If a monitor is running and the cluster clearly has matching events but peeks stay empty for minutes, suspect block-buffering in a pipeline stage. Wrap the stage in `stdbuf -oL` (Linux) or `gstdbuf -oL` (macOS, from `coreutils`). `kubectl -w -o json` and `stern` are line-buffered and do not need this; shell pipelines with intermediate `jq`/`awk`/`grep` often do.
+If a monitor is running and the cluster clearly has matching events but peeks stay empty for minutes, suspect block-buffering in a pipeline stage. Wrap the stage in `stdbuf -oL` (Linux) or `gstdbuf -oL` (macOS, from `coreutils`). `kubectl -w -o json` and `stern` are line-buffered and do not need this; the monitor's own `--jq` already runs `jq --unbuffered` (flushes per match), but if YOUR `--source` has its own intermediate `jq`/`awk`/`grep`, that stage often does.
 
 ## Failure modes to recognize
 

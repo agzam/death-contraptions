@@ -26,11 +26,15 @@ Arguments:
                         jq/etc. never become orphans.
 
 Filter (choose exactly one):
-  --jq <expr>   jq expression applied per input line. Match = jq stdout is
-                non-empty and not literal 'null'; its value is emitted.
-                Write selection and reshape in one expression, e.g.
+  --jq <expr>   jq filter applied to the source as a STREAM: the source is piped
+                through 'jq -c --unbuffered <expr>'. Parses a sequence of JSON
+                values INCLUDING multi-line ones (kubectl -o json, stern -o json)
+                - not just ND-JSON. A non-empty, non-null result is a match and
+                its value is emitted. Write selection + reshape in one
+                expression, e.g.
                   'select(.type==\"Warning\") | {ns:.involvedObject.namespace, reason:.reason}'
-                Source must emit one JSON value per line (ND-JSON).
+                For mixed text / non-JSON streams use --regex/--grep (a stream
+                parse error aborts jq).
   --regex <p>   Match lines against a Java regex; matching line is emitted
                 verbatim.
   --grep <s>    Match lines containing a literal substring; matching line
@@ -65,8 +69,8 @@ Semantics:
   - Diagnostics go to stderr. Stdout is match-only.
   - Source command must stay line-buffered on its stdout. Pipelines that
     block-buffer need stdbuf -oL (Linux) or gstdbuf -oL (macOS coreutils).
-  - --jq forks jq per input line. Fine for event streams; for very chatty
-    log tails prefer --regex.
+  - --jq runs ONE streaming jq over the source (handles multi-line JSON like
+    kubectl/stern -o json). For mixed text / non-JSON streams use --regex/--grep.
 ")
 
 (defn log!
@@ -208,26 +212,35 @@ Semantics:
   [needle line]
   (when (str/includes? line needle) line))
 
-(defn match-jq
-  "Shell out to jq per input line. A non-empty non-null jq stdout counts as
-  a match and its value becomes the emission, letting selection and reshape
-  share one expression. Forks jq per line - simple, correct, and fast enough
-  for event streams; swap to a persistent jq child only if throughput demands."
-  [expr line]
-  (let [{:keys [exit out]} (shell/sh "jq" "-c" expr :in line)
-        s (when (zero? exit) (str/trim out))]
-    (when (and (seq s) (not= s "null")) s)))
+(defn sh-squote
+  "Single-quote s for safe embedding in a sh -c command line."
+  [s]
+  (str "'" (str/replace s "'" "'\\''") "'"))
+
+(defn effective-source
+  "The command actually run under sh -c. For :jq we pipe the source through ONE
+  streaming jq (-c --unbuffered) instead of forking jq per line: per-line jq
+  cannot parse a multi-line JSON value, so pretty-printed streams (kubectl -o
+  json, stern -o json) silently never matched. Streaming jq parses a sequence
+  of JSON values (multi-line OK) and emits one compact line per result. Pure."
+  [{:keys [source filter-type filter-expr]}]
+  (if (= :jq filter-type)
+    (str source " | jq -c --unbuffered " (sh-squote filter-expr))
+    source))
 
 (defn make-matcher
-  "Close over the filter expression so the hot loop is a single call.
-  No filter (nil filter-type) is only reachable in digest mode - the parser
-  ensures a filter is set in every other mode. identity passes every line."
+  "Close over the filter for the hot loop. :regex/:grep test each raw source
+  line. :jq is pre-applied in (effective-source) - jq's stdout is already the
+  matched/reshaped value, so here we only drop its empty/null lines. nil filter
+  (digest mode only) passes every line."
   [{:keys [filter-type filter-expr]}]
   (case filter-type
     nil    identity
     :regex #(match-regex filter-expr %)
     :grep  #(match-grep filter-expr %)
-    :jq    #(match-jq filter-expr %)))
+    :jq    (fn [line]
+             (let [s (str/trim line)]
+               (when (and (seq s) (not= s "null")) line)))))
 
 (defn which
   "Resolve a binary path, nil when not on PATH. Used for jq preflight."
@@ -378,10 +391,10 @@ Semantics:
   On JVM shutdown, destroy-tree! cleans up the whole process subtree and we
   flush one final digest if digest mode is on. Named run-loop! to avoid
   shadowing clojure.core/run!."
-  [{:keys [source live max-runtime max-matches digest-interval] :as spec}]
+  [{:keys [live max-runtime max-matches digest-interval] :as spec}]
   (let [matcher (make-matcher spec)
         hits    (atom 0)
-        child   (proc/process ["sh" "-c" source]
+        child   (proc/process ["sh" "-c" (effective-source spec)]
                               {:out :stream :err :inherit})]
     (.addShutdownHook (Runtime/getRuntime)
                       (Thread. #(do
