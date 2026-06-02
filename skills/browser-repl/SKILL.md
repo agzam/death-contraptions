@@ -1,6 +1,6 @@
 ---
 name: browser-repl
-description: Drive a live browser from a ClojureScript REPL - nbb + Playwright behind an nREPL, evaluated through the nrepl MCP. The powerhouse for verifying/testing web products, scraping, auth automation, bulk downloads, and UI prototyping. Gives liveness (browser + atoms persist across evals), token economy (targeted extracts and scoped aria instead of multi-KB snapshots), live network/console capture for backend correlation, the full Playwright API, and fire-and-poll for long ops. Use when you need to interactively drive or inspect a real browser at low token cost, or correlate UI actions with backend signals. Prefer it over the Playwright MCP for anything iterative; use jxa-browser only for a quick peek at the user's already-open everyday browser.
+description: Drive a live browser from a ClojureScript REPL - nbb + Playwright behind an nREPL, evaluated through the nrepl MCP. The powerhouse for verifying/testing web products, scraping, auth automation, bulk downloads, and UI prototyping. Gives liveness (browser + atoms persist across evals), token economy (targeted extracts and scoped aria instead of multi-KB snapshots), live network/console capture for backend correlation, the full Playwright API, and fire-and-poll for long ops. Use when you need to interactively drive or inspect a real browser at low token cost, or correlate UI actions with backend signals. Use jxa-browser only for a quick peek at the user's already-open everyday browser.
 ---
 
 # Browser REPL (browser-repl)
@@ -23,8 +23,6 @@ Launcher: `/Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/launch.
 - browser-repl (this) - the powerhouse. Iterative driving, targeted extraction,
   live network/console capture, full Playwright API, long-running flows. Default
   choice for verifying/testing/automation.
-- Playwright MCP - a fixed-tool, big-snapshot fallback (default-disabled). Only
-  if browser-repl is unavailable and you want the curated tool surface.
 
 ## Prerequisites
 

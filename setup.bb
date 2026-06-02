@@ -64,10 +64,7 @@
    "qlik-kb"      {:command "qlik-kb/server.bb"
                    :platform :all}
    "nrepl"        {:command "nrepl/server.bb"
-                   :platform :all}
-   "playwright"   {:command "playwright/server.bb"
-                   :platform :darwin
-                   :default-disabled? true}})
+                   :platform :all}})
 
 (defn load-local-config
   "Read local-config.edn, trying .gpg first (via gpg --decrypt), then plain."
@@ -123,11 +120,11 @@
   [local-config]
   (let [local-servers (:servers local-config {})]
     (reduce-kv
-     (fn [acc name {:keys [command platform default-disabled?]}]
+     (fn [acc name {:keys [command platform]}]
        (if-not (platform-matches? platform)
          acc
          (let [local (get local-servers (keyword name) {})
-               disabled? (boolean (:disabled? local default-disabled?))
+               disabled? (boolean (:disabled? local))
                cfg (dissoc local :disabled?)]
            (when (and (not disabled?) (seq cfg))
              (write-server-config! name cfg))

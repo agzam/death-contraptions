@@ -29,19 +29,7 @@
   ;; Clojure/CLJS REPL bridge. Always-on: it is inert without a running nREPL,
   ;; and it is the channel the browser-repl powerhouse is driven through (start
   ;; a session with tools/browser-repl/launch.bb; see the browser-repl skill).
-  :nrepl   {}
-  ;; Browser automation for Qlik UI verification (the qlik-verify skill).
-  ;; Launch defaults live in tools/playwright/server.bb (config.edn is
-  ;; generated/gitignored); override per-machine here. Disabled until you
-  ;; flip :disabled?, and PIN :version before use.
-  :playwright {:disabled? true
-               :version "latest"      ; pin to a reviewed release, e.g. "0.0.41"
-               :mode :own-profile      ; or :attach (with :cdp-endpoint)
-               :user-data-dir "~/.cache/qlik-verify/chrome-profile"
-               :headless? false
-               :allowed-origins ["https://*.pte.qlikdev.com"
-                                 "https://*.qlik-stage.com"]
-               :output-dir "~/.cache/qlik-verify/output"}}
+  :nrepl   {}}
 
  ;; Domain config for the qlik-verify skill, read from local-config.edn.gpg
  ;; at runtime (via elisp-eval / Emacs epa) so these secrets stay encrypted

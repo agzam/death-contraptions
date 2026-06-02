@@ -1,3 +1,0 @@
-{:paths ["."]
- :tasks {test {:doc  "Run tests"
-               :task (load-file "run_tests.bb")}}}

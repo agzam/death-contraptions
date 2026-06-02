@@ -10,16 +10,17 @@ also scraper scripts, web-UI prototyping, auth automation, bulk downloads. The
 agent drives a live browser; a backend watcher (the `monitor` skill + k8s /
 Splunk) can correlate.
 
-## The three browser tools and their roles
+## The two browser tools and their roles
 
 - jxa-browser (existing MCP): drives your REAL, already-open everyday browser
   via AppleScript. Zero setup, non-invasive, no debug port. Unique niche: "the
   browser I'm using right now, as-is." Limited: no protocol-level
   network/devtools, no cross-origin iframes. Use for quick peeks.
-- Playwright MCP (`@playwright/mcp`, integrated, default-disabled): powerful but
-  a fixed-tool / big-snapshot interface. First cut; kept as a fallback.
-  On-demand via config toggle (heavy: edit config + `bb setup.bb` + reload).
-- nbb-REPL (the chosen powerhouse, in progress): nbb (ClojureScript on Node) +
+- Playwright MCP (`@playwright/mcp`): REMOVED. The nbb-REPL drives the Playwright
+  library directly with the full API + liveness + token economy, making the
+  curated fixed-tool / big-snapshot MCP redundant. `tools/playwright` deleted;
+  qlik-verify migrated to browser-repl.
+- nbb-REPL (the chosen powerhouse, DONE): nbb (ClojureScript on Node) +
   Playwright behind a live nREPL, driven via our nrepl MCP. Liveness (state in
   atoms), token economy (targeted queries vs huge snapshots), full Playwright
   API, live network capture. On-demand = start a process (the nrepl MCP
@@ -215,29 +216,35 @@ NEXT (tasks 5-6):
   `browser_repl.cljs` stdlib + `launch.bb` launcher + `nbb.edn`/`package.json`
   + `bb.edn`/`run_tests.bb`/`launch_test.bb`. Pinned local nbb+playwright.
 - `death-contraptions/.clj-kondo/config.edn` - promesa `p/let` lint-as.
-- `death-contraptions/tools/playwright/` - Playwright MCP launcher.
-- `death-contraptions/skills/qlik-verify/SKILL.md` - Qlik UI verification playbook.
-- `death-contraptions/setup.bb` - servers registry (+ `:default-disabled?`).
-- `death-contraptions/local-config.example.edn` - `:servers :playwright` +
+- `death-contraptions/skills/browser-repl/SKILL.md` - browser-repl playbook.
+- `death-contraptions/skills/qlik-verify/SKILL.md` - Qlik UI verification
+  playbook (drives the UI via browser-repl).
+- `death-contraptions/setup.bb` - servers registry.
+- `death-contraptions/local-config.example.edn` - `:servers` (incl. `:nrepl`) +
   `:qlik-verify` schema.
 - `death-contraptions/{bb.edn,run_tests.bb,setup_test.bb}` - root setup tests.
 - `~/.cache/qlik-verify/nbb-proto/` - prototype (`nre.bb`, `FINDINGS.md`).
-- `awesome-qlik-ai/mcp/assessments/playwright-mcp.md` - security assessment.
+- `awesome-qlik-ai/mcp/assessments/playwright-mcp.md` - security assessment for
+  the now-removed Playwright MCP (historical; separate repo).
 
-## Open decisions
+## Resolved decisions
 
-- Playwright MCP fate: keep as a disabled fallback, or remove `tools/playwright`
-  once the nbb-REPL is the powerhouse (task 5).
-- Enable the nrepl MCP always-on (it is inert without a running nREPL).
+- Playwright MCP: REMOVED (task 5). nbb-REPL is the powerhouse; `tools/playwright`
+  deleted, registry/`:default-disabled?`/configs/tests cleaned, qlik-verify
+  migrated to browser-repl.
+- nrepl MCP: always-on (`:nrepl {}` in the gpg config + example; inert without a
+  running nREPL).
 
 ## How to resume
 
-Point a fresh session at this file. Task 3 (browser-repl stdlib + launcher) is
-DONE and validated but NOT yet committed. Start at task 4 (browser-repl skill),
-documenting the `tools/browser-repl/` stdlib API + `launch.bb` modes/flags, the
-fire-and-poll pattern (`run-job!`/`job`), jxa-vs-Playwright-vs-nbb-REPL routing,
-and safety (local-only RCE, fresh-profile default, mutation gating, no echoing
-creds, teardown). Then 5 (wire: enable the nrepl MCP always-on + reconcile the
-Playwright MCP's fate) and 6 (e2e on vohi via plain `nrepl-eval`). To drive a
-session now: `bb tools/browser-repl/launch.bb --mode fresh` then `nrepl-eval`
-`(require '[browser-repl :as b])` and `(b/goto ...)`, `(b/aria)`, etc.
+Point a fresh session at this file. Tasks 3-5 are DONE: browser-repl tool +
+skill built (committed `9c4e4fa`), nrepl-mcp await fidelity fix (committed
+`2fc5635`), and the Playwright MCP removed + qlik-verify migrated to browser-repl
+(uncommitted as of writing). The nrepl MCP fidelity fix needs a clean ECA restart
+to actually take effect (stale-process trap, see gotchas).
+
+NEXT: commit the Playwright-removal + qlik-verify migration; run `bb setup.bb` to
+propagate the skills/config; then task 6 - validate e2e on vohi via plain
+`nrepl-eval`. Drive a session: `bb tools/browser-repl/launch.bb --mode fresh`,
+then `nrepl-eval` (`:port <printed> :await true`): `(require '[browser-repl :as b])`,
+`(b/goto ...)`, `(b/aria)`, etc.

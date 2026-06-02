@@ -10,21 +10,14 @@
 (def ^:private repo-root (-> *file* io/file .getCanonicalFile .getParent))
 (load-file (str repo-root "/setup.bb"))
 
-(deftest playwright-registered-and-default-disabled-test
-  (testing "playwright is registered but disabled when local-config omits it"
-    (let [entries (build-server-entries {})]
-      (is (contains? entries "playwright"))
-      (is (true? (:disabled (get entries "playwright"))))
-      (is (str/ends-with? (:command (get entries "playwright"))
-                          "/playwright/server.bb")))))
-
-(deftest playwright-enabled-when-local-sets-disabled-false-test
-  (testing "explicit :disabled? false in local-config enables playwright"
-    (let [entries (build-server-entries {:servers {:playwright {:disabled? false}}})]
-      (is (not (:disabled (get entries "playwright")))))))
-
-(deftest default-disabled-does-not-leak-test
-  (testing "servers without :default-disabled? stay enabled by default"
+(deftest servers-enabled-by-default-test
+  (testing "servers stay enabled (no :disabled) when local-config omits them"
     (let [entries (build-server-entries {})]
       (is (not (:disabled (get entries "elisp-eval"))))
       (is (not (:disabled (get entries "k8s")))))))
+
+(deftest local-disabled-flag-disables-test
+  (testing "explicit :disabled? true in local-config marks the server disabled"
+    (let [entries (build-server-entries {:servers {:k8s {:disabled? true}}})]
+      (is (true? (:disabled (get entries "k8s"))))
+      (is (str/ends-with? (:command (get entries "k8s")) "/k8s/server.bb")))))
