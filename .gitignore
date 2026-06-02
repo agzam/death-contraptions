@@ -2,6 +2,9 @@ local-config.edn
 tools/*/config.edn
 tools/qlik-kb/bin/
 
+# Node
+node_modules/
+
 # Clojure
 .cpcache/
 .clj-kondo/.cache/

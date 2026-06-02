@@ -71,6 +71,42 @@ DONE (committed):
   `setup_test.bb`. Validated: drove the vohi DI hub end-to-end (login,
   navigation, network capture) via the MCP.
 
+DONE (task 3 - browser-repl stdlib + launcher; validated, NOT yet committed):
+- `tools/browser-repl/browser_repl.cljs` - the nbb+Playwright stdlib: modes
+  fresh/persistent/attach; `configure!`/`start!`/`stop!` with idempotent lazy
+  auto-start (every action ensures the page); `goto`/`click`/`fill`/`type-text`/
+  `press` via target specs (`"css"` | `[:role r {:name..}]` | `[:text/:label/
+  :placeholder/:testid ..]` | Locator); targeted extractors `texts`/`text`/
+  `count-of`/`attrs`/`visible?`; `aria` scoped eyes (default body); opt-in
+  `capture-net!`/`capture-console!` into atoms with request-header correlation
+  keys + compact `net-summary`/`net-where`; `wait-url`/`wait-for`/`download!`/
+  `assert!`; `run-job!`/`job` fire-and-poll; `eval-js` (gotcha-doc'd); `status`/
+  `api`; all promesa-wrapped.
+- `tools/browser-repl/launch.bb` - launcher: pure builders (`nbb-cmd`,
+  `session-config`, `init-forms`, `await-wrap`) + spawns the pinned local nbb
+  nrepl-server in the tool dir, requires the stdlib + configures the mode +
+  starts the browser (all awaited via a bencode def-on-resolve/poll client),
+  writes `.nrepl-port` to a discovery dir, prints the port, supervises nbb, and
+  tears the whole process tree down on exit. Flags: `--port --mode --headless
+  --user-data-dir --cdp-endpoint --port-file-dir`.
+- `package.json` (nbb 1.3.204 + playwright 1.60.0, chromium-1223 shared cache),
+  `nbb.edn` (`:paths ["."]`), `bb.edn`/`run_tests.bb`/`launch_test.bb`
+  (6 tests / 25 assertions green), repo `.clj-kondo/config.edn` (promesa
+  lint-as; 0 errors/0 warnings on stdlib+launcher).
+- Validated e2e via the await/bencode path (= the MCP's `eval-code-await`) on a
+  fresh headless session: capture-net!/console, goto example.com, `aria` eyes,
+  text/texts extract, eval-js, `net-summary` -> `{200 1}`, `run-job!`/`job` ->
+  `:done`, clean whole-tree teardown (no nbb/chromium orphans).
+
+UNCOMMITTED (nrepl MCP fidelity upgrade; on disk + proto-validated + 33 tests
+green; live-MCP confirmation PENDING a clean ECA restart): reworked
+`client.clj` `eval-code-await` (+ `await-poll-form`) so async failures are real
+errors (isError, `*e` = real error, full message/call-log) and successes set
+`*1` - replacing the old `"ERR ..."` string. See gotchas for the mechanism, the
+global-`*1`/`*e` finding, and the stale-MCP-process trap that blocked live
+re-validation this session (ECA reload reconnected to stale processes; needs a
+clean restart to load the new code).
+
 UNCOMMITTED, separate repo: `awesome-qlik-ai/mcp/assessments/playwright-mcp.md`
 (goes via that repo's branch/PR workflow, not a direct main commit).
 
@@ -80,25 +116,74 @@ liveness, token economy (20 connection names in 534 chars vs a multi-KB
 snapshot), live response capture (37 `/api/v1` responses into an atom). A live
 nbb nREPL may still be running on port 4321 (ephemeral bg job).
 
-NEXT (tasks 3-6):
-3. browser-repl stdlib + launcher (`death-contraptions/tools/browser-repl/`):
-   `browser_repl.cljs` (modes fresh/persistent/attach; nav/click/fill; targeted
-   extractors; `aria` eyes; net+console capture into atoms with correlation;
-   download/wait/assert; promesa), a launcher (`nbb nrepl-server` + stdlib +
-   mode, writes `.nrepl-port`), `package.json`/`nbb.edn`. Reuse nbb-proto
-   patterns.
-4. browser-repl skill: modes, stdlib API, jxa-vs-Playwright routing hint,
-   fire-and-poll for long ops, safety (local-only RCE, fresh-profile default,
-   mutation gating, no echoing creds), teardown.
-5. Wire + reconcile: enable the nrepl MCP as the always-on channel (config +
-   `bb setup.bb` + reload); decide the Playwright MCP's fate (keep disabled
-   fallback vs remove `tools/playwright`); update example config + docs.
+DONE:
+4. browser-repl skill - `skills/browser-repl/SKILL.md`: tool routing
+   (jxa/Playwright/nbb-REPL), launch + modes, `nrepl-eval` driving (`:port` +
+   `:await true`), eyes/extraction, net/console capture, fire-and-poll, live
+   reload, errors/gotchas, safety (local-only RCE, fresh-profile default,
+   mutation gating, no echoing creds), teardown, API reference. Needs
+   `bb setup.bb` to propagate to the consumers.
+
+NEXT (tasks 5-6):
+5. Wire + reconcile: nrepl MCP enabled in the gpg config + `local-config.example.edn`
+   (`:nrepl {}`, always-on, documented as the browser-repl channel) - DONE.
+   STILL OPEN: decide the Playwright MCP's fate (keep disabled fallback vs
+   remove `tools/playwright`); run `bb setup.bb` to propagate the new skill +
+   config; the nrepl MCP fidelity upgrade needs a clean ECA restart to take
+   effect (stale-process trap, see gotchas).
 6. Validate e2e on vohi via the new path (login + targeted extract + network
-   correlation) with plain `nrepl-eval`.
+   correlation) with plain `nrepl-eval`. Blocked until the MCP runs fresh code.
 
 ## Hard-won facts & gotchas (do not relearn)
 
 - nbb nREPL returns promises, not values -> `eval-code-await` wraps + polls.
+- nbb's SCI nREPL has NO `load-file`. Load the stdlib with `(require '[browser-repl])`
+  (nbb runs in the tool dir whose `nbb.edn` puts `.` on :paths). The launcher does this.
+- `require`/loading an npm-module-bearing ns (playwright) is ASYNC over nREPL
+  (returns a promise) -> AWAIT it, not just `start!`. The launcher awaits every
+  init form (require + configure! + start!), in order.
+- nbb writes its own `.nrepl-port` in its CWD on startup. nbb+playwright TRAP
+  SIGTERM to close chromium gracefully and can outlive a plain `.destroy`; tear
+  the whole descendant tree down (SIGTERM, brief grace, then SIGKILL survivors).
+- nrepl MCP auto-discovery only finds `.nrepl-port` in an ANCESTOR of the MCP's
+  CWD (the FIRST ECA workspace root, e.g. qlik-trial). A port file in a sibling
+  repo is NOT found. Either pass `:port` + `:await true` to `nrepl-eval`
+  explicitly (reliable), or `launch.bb --port-file-dir <that ancestor>`. Verified
+  live: `nrepl-list-ports` saw nothing for a death-contraptions port while the
+  MCP ran from qlik-trial; explicit `:port` + `:await true` drove it end-to-end
+  (HN: 30 stories extracted, net-summary {200 7}, scoped aria) through the MCP.
+- nbb/SCI `*1`/`*2`/`*3`/`*e` are GLOBAL across nREPL sessions, NOT per-session
+  (verified: cloning a session does not isolate them). So poll-driven await
+  cannot keep `*2`/`*3` clean (every poll eval shifts the one global history) -
+  but `*1` (resolved value), `*e` (real error), and isError ARE faithful via
+  capture+re-throw (see the eval-code-await upgrade below).
+- eval-code-await FIDELITY UPGRADE (committed-ready, on disk, proto-validated;
+  pending live-MCP confirmation): the kickoff now runs CODE inside
+  `(p/then (fn [_] CODE))` so sync throws AND async rejections both land the
+  REAL error object in `*nre-err*`; a single poll form re-throws it so a failure
+  is a genuine error (isError + `*e` bound) and a success returns the value (->
+  `*1`). Throw a FRESH `js/Error` carrying `(.-message *nre-err*)`, NOT the raw
+  rejection: throwing a host error class (e.g. Playwright's TimeoutError) trips
+  nbb's "nth not supported" printer quirk and loses the message; the original
+  stays in `*nre-err*`. Validated via the bencode proto client on the live nbb:
+  failing click -> real "locator.click: Timeout..." + call log, `*e` =
+  ex-message; `(p/resolved 42)` -> 42 + `*1`; sync `(throw ...)` -> surfaced.
+- "nth not supported on this type function(a,b,c,d){this.cc=a;this.name=b;...}"
+  on a SUCCESS-path async eval is the tell that the result is a RAW (un-awaited)
+  promesa promise being printed (G/O bitmasks => a cljs type, not a JS error) -
+  i.e. the MCP is running `eval-code`, not `eval-code-await`. Means await isn't
+  active: stale server.bb, or `await` arg not honored + `cljs-port?` false.
+- ECA "reload" of an MCP can RECONNECT to a still-alive stale process instead of
+  restarting it, so client.clj/server.bb edits silently DON'T take effect (you
+  keep getting old behavior though disk is new). Tell: multiple `eca server`
+  instances in `ps` (leaked across sessions) each owning duplicate tool servers.
+  Reliable reload = kill ALL `tools/nrepl/server.bb` procs (the browser-repl
+  nbb on its own port is untouched) so reconnect is impossible, THEN reload; or
+  a clean full ECA restart. Verified the stale-process trap live this session.
+- clj-kondo flags every `p/let` binding as unresolved without
+  `:lint-as {promesa.core/let clojure.core/let}` (repo `.clj-kondo/config.edn`).
+- The system nbb is mise/node-22-pinned and won't run under node 24; pin
+  nbb+playwright as LOCAL deps and invoke `node_modules/.bin/nbb`.
 - `page.evaluate` with a STRING evaluates an EXPRESSION: `"() => ..."` returns
   the function (serializes to nil). Drop the arrow or use an IIFE.
 - `allowed-origins` must include `https://*.qlikcloud.com` (the CDN import-map
@@ -126,6 +211,10 @@ NEXT (tasks 3-6):
 
 - `death-contraptions/tools/nrepl/` - upgraded nrepl MCP (`eval-code-await`;
   `await`/`cljs-port?`).
+- `death-contraptions/tools/browser-repl/` - the nbb-REPL powerhouse:
+  `browser_repl.cljs` stdlib + `launch.bb` launcher + `nbb.edn`/`package.json`
+  + `bb.edn`/`run_tests.bb`/`launch_test.bb`. Pinned local nbb+playwright.
+- `death-contraptions/.clj-kondo/config.edn` - promesa `p/let` lint-as.
 - `death-contraptions/tools/playwright/` - Playwright MCP launcher.
 - `death-contraptions/skills/qlik-verify/SKILL.md` - Qlik UI verification playbook.
 - `death-contraptions/setup.bb` - servers registry (+ `:default-disabled?`).
@@ -143,6 +232,12 @@ NEXT (tasks 3-6):
 
 ## How to resume
 
-Point a fresh session at this file. Start at task 3 (browser-repl stdlib +
-launcher), reusing the `~/.cache/qlik-verify/nbb-proto` patterns and the
-validated `eval-code-await` path. Then 4-6.
+Point a fresh session at this file. Task 3 (browser-repl stdlib + launcher) is
+DONE and validated but NOT yet committed. Start at task 4 (browser-repl skill),
+documenting the `tools/browser-repl/` stdlib API + `launch.bb` modes/flags, the
+fire-and-poll pattern (`run-job!`/`job`), jxa-vs-Playwright-vs-nbb-REPL routing,
+and safety (local-only RCE, fresh-profile default, mutation gating, no echoing
+creds, teardown). Then 5 (wire: enable the nrepl MCP always-on + reconcile the
+Playwright MCP's fate) and 6 (e2e on vohi via plain `nrepl-eval`). To drive a
+session now: `bb tools/browser-repl/launch.bb --mode fresh` then `nrepl-eval`
+`(require '[browser-repl :as b])` and `(b/goto ...)`, `(b/aria)`, etc.

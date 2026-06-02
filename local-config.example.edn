@@ -26,7 +26,10 @@
                               :local-port 11434}}
   :qlik-kb {:disabled? true
             :qcs-api-token "your_qcs_api_token"}
-  :nrepl   {:disabled? true}
+  ;; Clojure/CLJS REPL bridge. Always-on: it is inert without a running nREPL,
+  ;; and it is the channel the browser-repl powerhouse is driven through (start
+  ;; a session with tools/browser-repl/launch.bb; see the browser-repl skill).
+  :nrepl   {}
   ;; Browser automation for Qlik UI verification (the qlik-verify skill).
   ;; Launch defaults live in tools/playwright/server.bb (config.edn is
   ;; generated/gitignored); override per-machine here. Disabled until you

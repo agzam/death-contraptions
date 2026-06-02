@@ -1,0 +1,15 @@
+{
+  "name": "browser-repl",
+  "version": "0.1.0",
+  "description": "nbb + Playwright behind a live nREPL: the agentic browser REPL powerhouse, driven via the nrepl MCP.",
+  "private": true,
+  "license": "GPL-3.0-or-later",
+  "type": "module",
+  "dependencies": {
+    "nbb": "1.3.204",
+    "playwright": "1.60.0"
+  },
+  "scripts": {
+    "postinstall": "playwright install chromium"
+  }
+}
