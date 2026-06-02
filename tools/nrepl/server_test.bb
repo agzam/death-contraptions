@@ -152,12 +152,30 @@
 ;; ---------------------------------------------------------------------------
 
 (deftest await-kickoff-code-test
-  (testing "wraps code into a promesa kickoff with sentinels"
+  (testing "wraps code into a promesa kickoff that captures value + REAL error"
     (let [k (client/await-kickoff-code "(foo)")]
+      (is (some? (read-string k)) "assembled form has balanced delimiters")
+      (is (str/includes? k "(foo)") "embeds the user code")
       (is (str/includes? k "*nre-pending*"))
-      (is (str/includes? k "(foo)"))
+      (is (str/includes? k "*nre-val*"))
+      (is (str/includes? k "*nre-err*") "captures the real error object")
+      (is (not (str/includes? k "\"ERR ")) "no longer stringifies errors")
+      (is (str/includes? k "p/then"))
       (is (str/includes? k "p/catch"))
-      (is (str/includes? k ":nre/kicked")))))
+      (is (str/ends-with? k ":nre/kicked)")))))
+
+(deftest await-poll-form-test
+  (testing "poll form: pending sentinel, else throw the captured error message or yield value"
+    (let [pf @#'client/await-poll-form]
+      (is (some? (read-string pf)) "poll form has balanced delimiters")
+      (is (str/includes? pf "*nre-pending*"))
+      (is (str/includes? pf ":nre/await-pending"))
+      (is (str/includes? pf "throw") "throws on failure -> binds *e, marks isError")
+      ;; throw a fresh js/Error with the captured message, not the raw object
+      ;; (raw host errors like Playwright's trip nbb's 'nth not supported' quirk)
+      (is (str/includes? pf "js/Error."))
+      (is (str/includes? pf ".-message *nre-err*"))
+      (is (str/includes? pf "*nre-val*")))))
 
 (deftest cljs-port-detection-test
   (testing "cljs-port? reflects the discovery cache repl type"

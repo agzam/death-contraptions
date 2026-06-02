@@ -1,0 +1,3 @@
+;; promesa's p/let binds like clojure.core/let; without this clj-kondo flags
+;; every binding inside it as an unresolved symbol.
+{:lint-as {promesa.core/let clojure.core/let}}

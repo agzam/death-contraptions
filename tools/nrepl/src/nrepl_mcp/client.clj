@@ -171,40 +171,70 @@
     (do-eval true)))
 
 ;; --- cljs/nbb await -------------------------------------------------------
-;; nbb's nREPL returns the promise object, not its resolved value. For cljs
-;; sessions we kick off a wrapper that stashes the resolved value into
-;; *nre-val* and flips *nre-pending*, then poll until done and read *nre-val*.
-;; The kickoff strings mirror a pattern validated against a live nbb session.
-;; promesa is built into nbb; we ensure it is required as `p` first.
+;; nbb's nREPL returns the promise object, not its resolved value, and its
+;; *1/*2/*3/*e history vars are GLOBAL (shared across sessions, not per-session
+;; - verified). For real-REPL fidelity we:
+;;   1. kick off a wrapper that runs CODE inside a promise chain, capturing the
+;;      resolved value in *nre-val* and the REAL error object (a synchronous
+;;      throw OR an async rejection alike) in *nre-err*;
+;;   2. poll one form that, once settled, hands back the value (so it lands in
+;;      *1) or RE-THROWS the real error (so nREPL binds *e and the MCP renders a
+;;      genuine error - not an "ERR ..." string).
+;; Running CODE inside (p/then (fn [_] CODE)) funnels sync throws and async
+;; rejections through the same p/catch. promesa is built into nbb; require it
+;; as `p` first so its macros are available when the kickoff is analyzed.
 
 (def ^:private await-require "(require (quote [promesa.core :as p]))")
-(def ^:private await-pre "(do (def *nre-pending* true) (p/catch (p/let [v ")
+(def ^:private await-pre
+  (str "(do (def *nre-pending* true) (def *nre-err* nil) (def *nre-val* nil)"
+       " (-> (p/resolved nil) (p/then (fn [_nre] "))
 (def ^:private await-post
-  (str "] (def *nre-val* v) (def *nre-pending* false)) "
-       "(fn [e] (def *nre-val* (str \"ERR \" (or (.-message e) e))) (def *nre-pending* false))) "
-       ":nre/kicked)"))
+  (str ")) (p/then (fn [x] (def *nre-val* x) (def *nre-pending* false)))"
+       " (p/catch (fn [e] (def *nre-err* e) (def *nre-pending* false))))"
+       " :nre/kicked)"))
 
 (defn await-kickoff-code
-  "Wrap CODE so its (possibly promise) result lands in *nre-val*. Pure."
+  "Wrap CODE so its eventual value lands in *nre-val* and any failure (sync
+   throw or async rejection) lands in *nre-err* as the REAL error object.
+   Returns :nre/kicked immediately; the promise settles on a later tick. Pure."
   [code]
   (str await-pre code await-post))
 
+;; One poll form, double duty: still pending -> a sentinel keyword; settled ->
+;; hand back the value (which becomes *1) or throw the failure (which binds *e
+;; and surfaces as a genuine nREPL error -> the MCP marks isError).
+;; We throw a fresh js/Error carrying the captured MESSAGE rather than the raw
+;; rejection object: throwing some host error classes (e.g. Playwright's) trips
+;; nbb's "nth not supported" printer quirk and loses the real message. The
+;; original object stays in *nre-err* for inspection.
+(def ^:private await-poll-form
+  (str "(if *nre-pending* :nre/await-pending"
+       " (if (some? *nre-err*)"
+       " (throw (js/Error. (or (.-message *nre-err*) (str *nre-err*))))"
+       " *nre-val*))"))
+(def ^:private await-pending-value ":nre/await-pending")
+
 (defn eval-code-await
-  "Evaluate CODE on a cljs/nbb nREPL and resolve its promise before returning.
-   Ensures promesa, kicks off the wrapper, polls *nre-pending*, then returns
-   the *nre-val* read (same shape as eval-code)."
-  [{:keys [host port code session timeout-ms]
+  "Evaluate CODE on a cljs/nbb nREPL and resolve its promise before returning,
+   with real-REPL fidelity: the resolved value becomes *1, while a failure
+   re-throws the real error so *e is bound and the result is a genuine error
+   (not an \"ERR \" string). Returns the same result shape as eval-code."
+  [{:keys [host port code session ns timeout-ms]
     :or {host "localhost" timeout-ms 30000}}]
-  (let [ev (fn [c tmo] (eval-code {:host host :port port :code c :session session :timeout-ms tmo}))]
+  (let [ev (fn [c tmo] (eval-code {:host host :port port :code c :session session :ns ns :timeout-ms tmo}))]
     (ev await-require 5000)
-    (ev (await-kickoff-code code) 10000)
-    (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
-      (loop []
-        (let [pend (:value (ev "*nre-pending*" 5000))]
-          (cond
-            (= pend "false") (ev "*nre-val*" 5000)
-            (< deadline (System/currentTimeMillis)) {:value "nil" :err "await timeout" :timed-out? true}
-            :else (do (Thread/sleep 150) (recur))))))))
+    (let [kicked (ev (await-kickoff-code code) 10000)]
+      (if (some? (:ex kicked))
+        kicked                                  ;; CODE failed to compile/eval up front
+        (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+          (loop []
+            (let [r (ev await-poll-form 5000)]
+              (cond
+                (some? (:ex r))                       r   ;; settled with a real error
+                (not= await-pending-value (:value r)) r   ;; settled with a value
+                (< deadline (System/currentTimeMillis))
+                {:value "nil" :err "await timeout" :timed-out? true}
+                :else (do (Thread/sleep 150) (recur))))))))))
 
 (defn close-all!
   []
