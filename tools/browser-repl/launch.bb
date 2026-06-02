@@ -7,9 +7,9 @@
 ;; (Ctrl-C / kill tears the browser down), and prints the port for explicit
 ;; `:port` use when auto-discovery dirs do not line up.
 ;;
-;; Reuses the nbb-proto bencode-client + def-on-resolve/poll await pattern
-;; (nbb's nREPL returns the promise object, not its value) baked into the nrepl
-;; MCP as eval-code-await. See plan.md.
+;; Uses a minimal bencode nREPL client + def-on-resolve/poll await pattern
+;; (nbb's nREPL returns the promise object, not its value) - the same pattern
+;; baked into the nrepl MCP as eval-code-await. See plan.md.
 
 (require '[babashka.cli :as cli]
          '[babashka.process :as proc]
@@ -30,7 +30,7 @@
    :headless      {:coerce :boolean :default false  :desc "Run chromium headless."}
    :user-data-dir {:coerce :string  :desc "Persistent profile dir (mode persistent)."}
    :cdp-endpoint  {:coerce :string  :desc "CDP endpoint, e.g. http://127.0.0.1:9222 (mode attach)."}
-   :port-file-dir {:coerce :string  :desc "Dir to write .nrepl-port into (default: CWD)."}})
+   :port-file-dir {:coerce :string  :desc "Dir to write .nrepl-port into (default: the tool dir; the registry handles cross-repo discovery)."}})
 
 ;; --------------------------------------------------------------------------
 ;; Pure builders (side-effect free so launch_test.bb can assert them)
@@ -162,9 +162,16 @@
         nbb-bin       (io/file tool-dir "node_modules" ".bin" "nbb")
         stdlib        (str tool-dir "/browser_repl.cljs")
         port          (or (:port opts) (free-port))
-        port-file-dir (or (:port-file-dir opts) (System/getProperty "user.dir"))
+        ;; default to the tool dir, NOT the CWD: running the launcher from a real
+        ;; repo (e.g. the first ECA workspace) must not litter it with .nrepl-port.
+        ;; cross-repo discovery is the registry's job now, not a CWD breadcrumb.
+        port-file-dir (or (:port-file-dir opts) tool-dir)
         port-file     (io/file port-file-dir ".nrepl-port")
         own-port-file (io/file tool-dir ".nrepl-port")   ; nbb writes its own here
+        registry-dir  (or (System/getenv "NREPL_MCP_PORT_DIR")
+                          (str (System/getProperty "user.home") "/.cache/nrepl-ports"))
+        ;; advertise here so the nrepl MCP auto-discovers us from a sibling repo
+        registry-file (io/file registry-dir (str "browser-repl-" port ".port"))
         config        (session-config opts)]
     (when-not (.exists nbb-bin)
       (die (str "browser-repl: nbb not installed. Run:\n  (cd " tool-dir " && npm install)")))
@@ -188,7 +195,7 @@
                       (when (.isAlive ^Process pr) (.destroyForcibly ^Process pr))
                       (doseq [k kids] (when (.isAlive k) (.destroyForcibly k))))
                     (catch Exception _))
-                  (doseq [f [port-file own-port-file]]
+                  (doseq [f [port-file own-port-file registry-file]]
                     (try (when (.exists f) (.delete f)) (catch Exception _))))))
       (when-not (wait-port port 20000)
         (die "browser-repl: nbb nREPL did not come up within 20s."))
@@ -199,6 +206,8 @@
           ;; guarantee require finishes before configure!/start! reference the ns.
           (let [res (last (doall (map #(await-eval conn % 30000) (init-forms config))))]
             (spit port-file (str port))
+            (try (.mkdirs (io/file registry-dir)) (spit registry-file (str port))
+                 (catch Exception _))
             (println)
             (println "browser-repl session up.")
             (println (str "  nREPL port : " port "  (mode " (:mode config)

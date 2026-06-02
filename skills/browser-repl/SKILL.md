@@ -55,10 +55,14 @@ Note the printed port - you will pass it to `nrepl-eval` explicitly.
 
 ## 2. Drive it via nrepl-eval
 
-ALWAYS pass `:port <the launcher's port>` and `:await true`. Auto-discovery only
-finds `.nrepl-port` under the MCP's own workspace, so a session in this repo is
-usually not auto-discovered; and `:await true` is required so promises resolve
-(nbb returns the promise object otherwise - see gotchas).
+Pass `:port <the launcher's port>` and `:await true`. Both are now usually
+auto-handled - the launcher advertises its port to the registry dir
+(`~/.cache/nrepl-ports/`, override `$NREPL_MCP_PORT_DIR`) so the MCP can
+auto-discover a session even in a sibling repo, and the MCP classifies nbb
+correctly so it auto-awaits cljs ports. But explicit `:port` + `:await true`
+stays the reliable default (and is the only thing that works until the MCP has
+reloaded those fixes). `:await true` is what makes promises resolve - nbb
+returns the promise object otherwise (see gotchas).
 
 The stdlib is loaded as the `browser-repl` namespace. Call it qualified
 (`browser-repl/goto`) or alias it once per session: `(require '[browser-repl :as b])`.
@@ -70,6 +74,10 @@ The stdlib is loaded as the `browser-repl` namespace. Call it qualified
 
 Navigation/interaction (each auto-starts the browser if needed):
 - `(goto url)` `(current-url)` `(wait-url glob-or-regex)` `(wait-for target)`
+- `(wait-load "load|domcontentloaded|networkidle")` `(wait-networkidle)` - PAGE
+  lifecycle, e.g. after a click that fires background XHRs. `wait-for` is for a
+  target's state only; for page settle use these (passing `wait-for` a
+  `{:state "load"}` map errors with "Could not find instance method: first").
 - `(click target)` `(fill target s)` `(type-text target s)` `(press target key)`
 
 `target` is a spec resolved at action time (no "built before start" trap):
@@ -95,9 +103,14 @@ Opt-in; attach BEFORE the action so nothing is missed.
 (browser-repl/net-where "/api/v1/datasets")           ; compact matching entries + correlation headers
 ```
 
-Request-side correlation keys (`x-request-id`, `traceparent`, ...) are captured
-from requests into the `net` atom - join key for a backend watcher (see the
-`monitor` skill). `(capture-console!)` + `(console-tail n)` for console output.
+Each `net` entry is `{:phase :req|:resp :method :url :status :headers :ts}`;
+`net-where` projects `:phase :method :status :url :headers`. `:headers` on a
+`:req` holds the request-side correlation keys (`x-request-id`, `traceparent`,
+...) - the join key for a backend watcher (see the `monitor` skill) - but it is
+often `{}`: many backends (Qlik included) inject trace ids server-side at the
+gateway, so the browser never sends them. When `:headers` is empty, correlate on
+tenant + endpoint + time instead. `(capture-console!)` + `(console-tail n)` for
+console output.
 
 ## 5. Long ops: fire-and-poll
 
@@ -125,12 +138,28 @@ browser and capture atoms:
   message (e.g. the full Playwright timeout + call log), and `*e` bound to it -
   inspect with `(ex-message *e)`. A success sets `*1` for chaining. (`*2`/`*3`
   are not reliable: nbb's history vars are global and the await poll shifts them.)
-- "nth not supported on this type function(a,b,c,d){this.cc=a;...}" on a SUCCESS
-  call means the result is a raw, un-awaited promise being printed -> you forgot
-  `:await true` (or the nrepl MCP is serving stale code; restart it).
+- "nth not supported on this type function(a,b,c,d){this.cc=a;...}" is nbb's
+  spurious print of a promise-bearing eval. The await path now tolerates it
+  (`eval-code-await` polls the sentinels instead of bailing). If you STILL see it
+  on a `:await true` call, either you omitted `:await true`, or the MCP is
+  serving stale code - call `nrepl-server-info`; `stale? true` means a source
+  file is newer than the running process, so reload the MCP.
 - `eval-js` takes a JS EXPRESSION string. A bare `"() => document.title"` returns
   the function (serializes to nil). Use `"document.title"` or an IIFE.
 - nbb has no `load-file`; load/reload the stdlib with `(require '[browser-repl] :reload)`.
+- Combining async reads in one eval: use `p/let`, not `let`. Every browser-repl
+  fn returns a promise, so `(let [u (current-url) t (eval-js "document.title")] {:u u :t t})`
+  yields a map of unresolved `#<Promise>`s; `(p/let [u (current-url) t (eval-js "document.title")] {:u u :t t})`
+  resolves them. (Driving over the proto bencode client `--await`, the kickoff
+  already wraps your form in `p/let`, so the form itself can be a plain `p/let`.)
+- A browser that closes underneath the session (crash, window closed) no longer
+  wedges it silently: `started?` reflects real liveness (checks `.isClosed`) and
+  the next `(goto ...)`/action drops the dead handles and relaunches. Caveat: a
+  `:persistent` session whose chromium lingers holding the profile lock surfaces
+  `Opening in existing browser session ... profile is already in use` - that is
+  the actionable error (not the old cryptic "Target page... closed"). Recover by
+  killing the launcher bg job (its shutdown hook tree-kills the zombie + frees
+  the lock), then relaunch.
 
 ## Safety
 
@@ -155,7 +184,7 @@ profile so the next run skips re-auth.
 
 ```
 configure! start! stop! page started? status api
-goto current-url wait-url wait-for
+goto current-url wait-url wait-for wait-load wait-networkidle
 click fill type-text press        ; target := "css" | [:role r {opts}] | [:text/:label/:placeholder/:testid s] | Locator
 loc css by-role by-text by-label by-placeholder by-testid
 texts text count-of attrs visible? aria eval-js

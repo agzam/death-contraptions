@@ -57,14 +57,25 @@
   []
   (:page @state))
 
-(defn started? []
-  (some? (page)))
+(defn- page-live?
+  "True only if PG is an OPEN page. A browser that closed underneath us (crash,
+   window closed, context closed) leaves a non-nil but closed handle - this is
+   how we tell that apart so start! relaunches instead of handing back a corpse."
+  [pg]
+  (boolean (and pg (try (not (.isClosed pg)) (catch :default _ false)))))
+
+(defn started?
+  "True only when there is a LIVE page. Flips back to false if the browser
+   closed underneath the session, so (start!) relaunches on the next action."
+  []
+  (page-live? (page)))
 
 (defn- pg!
-  "The current Page or a clear error - used by synchronous locator builders."
+  "The current LIVE page or a clear error - used by synchronous locator builders."
   []
-  (or (page)
-      (throw (js/Error. "No page yet - call (start!) or (goto url) first."))))
+  (let [p (page)]
+    (if (page-live? p) p
+        (throw (js/Error. "No live page - call (start!) or (goto url) first.")))))
 
 ;; --------------------------------------------------------------------------
 ;; Locators: target specs unify the locator helpers the agent needs.
@@ -196,9 +207,14 @@
 
 (defn start!
   "Launch the browser for the configured mode and remember browser/context/page.
-   Idempotent - returns the existing page if already started. Doubles as the
-   ensure-page! every action calls, so a bare (goto url) auto-starts."
+   Idempotent - returns the existing LIVE page if started. If the browser closed
+   underneath us, drops the dead handles and relaunches, so a bare (goto url)
+   both auto-starts and auto-recovers a crashed session."
   []
+  (when (and (not (started?)) (:page @state))
+    ;; a session died with handles still set (browser closed underneath us) ->
+    ;; drop the corpse so the launch branch below builds a fresh one
+    (swap! state assoc :browser nil :context nil :page nil))
   (if (started?)
     (p/resolved (page))
     (let [{:keys [mode headless? user-data-dir cdp-endpoint viewport]} (:config @state)
@@ -353,13 +369,31 @@
 
 (defn wait-for
   "Wait for a target's state (\"visible\" default; also \"hidden\"/\"attached\"
-   /\"detached\")."
+   /\"detached\"). For PAGE lifecycle (load/networkidle) use wait-load, NOT this
+   - wait-for only takes a target spec, not a {:state ..} map."
   ([target] (wait-for target {}))
   ([target opts]
    (p/let [_ (start!)
            _ (.waitFor (.first (resolve-target target))
                        (clj->js (merge {:state "visible"} opts)))]
      :ready)))
+
+(defn wait-load
+  "Wait for a PAGE lifecycle state: \"load\" (default), \"domcontentloaded\", or
+   \"networkidle\". Use after an action that triggers navigation/XHRs when you
+   need the page settled before extracting/correlating (wait-for is for targets,
+   not page lifecycle)."
+  ([] (wait-load "load"))
+  ([state]
+   (p/let [pg (start!)
+           _  (.waitForLoadState pg state)]
+     (keyword (str "loaded-" state)))))
+
+(defn wait-networkidle
+  "Wait until there are no network connections for >=500ms - the settle point
+   after a click that fires background XHRs, before net-where/extraction."
+  []
+  (wait-load "networkidle"))
 
 (defn download!
   "Run trigger-fn (0-arg, initiates the download e.g. (fn [] (click ...))) and
@@ -417,7 +451,7 @@
   (let [pg (page)]
     {:mode      (get-in @state [:config :mode])
      :started?  (started?)
-     :url       (when pg (.url pg))
+     :url       (when (page-live? pg) (try (.url pg) (catch :default _ nil)))
      :capturing @capturing
      :net       (count @net)
      :console   (count @console)
@@ -428,6 +462,7 @@
   ["(configure! {:mode :fresh|:persistent|:attach :headless? false ...})"
    "(start!) (stop!) (status) (page)"
    "(goto url) (current-url) (wait-url glob) (wait-for target)"
+   "(wait-load \"load|domcontentloaded|networkidle\") (wait-networkidle)  ; PAGE lifecycle, not a target"
    "(click target) (fill target v) (type-text target s) (press target key)"
    "  target := \"css\" | [:role r {:name ..}] | [:text s] | [:label s] | [:placeholder s] | [:testid s] | Locator"
    "(aria) (aria target)  ; scoped ARIA 'eyes'"
