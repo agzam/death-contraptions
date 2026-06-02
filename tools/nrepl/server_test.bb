@@ -147,6 +147,27 @@
                                   :code "(throw (ex-info \"boom\" {}))"})]
     (is (some? (:ex result)))))
 
+;; ---------------------------------------------------------------------------
+;; cljs/nbb await
+;; ---------------------------------------------------------------------------
+
+(deftest await-kickoff-code-test
+  (testing "wraps code into a promesa kickoff with sentinels"
+    (let [k (client/await-kickoff-code "(foo)")]
+      (is (str/includes? k "*nre-pending*"))
+      (is (str/includes? k "(foo)"))
+      (is (str/includes? k "p/catch"))
+      (is (str/includes? k ":nre/kicked")))))
+
+(deftest cljs-port-detection-test
+  (testing "cljs-port? reflects the discovery cache repl type"
+    (reset! discovery-cache {:ports [{:port 7001 :type :nbb}
+                                     {:port 7002 :type :clj}] :ts 0})
+    (is (true? (cljs-port? 7001)))
+    (is (false? (cljs-port? 7002)))
+    (is (false? (cljs-port? 9999)))
+    (invalidate-discovery-cache!)))
+
 (deftest eval-mcp-roundtrip-test
   (let [resp (handle-request
               {"id" 10 "method" "tools/call"

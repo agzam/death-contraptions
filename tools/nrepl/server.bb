@@ -60,6 +60,14 @@
 (defn invalidate-discovery-cache! []
   (reset! discovery-cache nil))
 
+(defn cljs-port?
+  "True when the discovery cache classifies this port as a cljs runtime
+   (nbb/shadow-cljs), where eval returns a promise that must be awaited."
+  [port]
+  (boolean (some (fn [p] (and (= port (:port p))
+                              (#{:nbb :shadow-cljs} (:type p))))
+                 (:ports @discovery-cache))))
+
 ;; ---------------------------------------------------------------------------
 ;; Tool definitions - intentionally minimal for token efficiency.
 ;; nrepl-doc, nrepl-load-file, nrepl-interrupt removed: the LLM can
@@ -82,7 +90,9 @@
                  :timeout_ms {:type "integer"
                               :description "Timeout in ms (default: 30000)."}
                  :reset_session {:type "boolean"
-                                 :description "Reset session before eval."}}
+                                 :description "Reset session before eval."}
+                 :await {:type "boolean"
+                         :description "Resolve a returned promise before replying (cljs/nbb). Auto-detected for nbb/shadow-cljs sessions; set explicitly to override."}}
     :required ["code"]}})
 
 (def nrepl-list-ports-tool
@@ -99,7 +109,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn eval-nrepl
-  [{:strs [code port host ns timeout_ms reset_session]}]
+  [{:strs [code port host ns timeout_ms reset_session await]}]
   (let [port (or port (cached-discover-port))
         host (or host "localhost")]
     (if-not port
@@ -118,7 +128,9 @@
               session (if reset_session
                         (sessions/reset-session! host port)
                         (sessions/get-session! host port))
-              result (client/eval-code
+              await? (if (some? await) await (cljs-port? port))
+              eval-fn (if await? client/eval-code-await client/eval-code)
+              result (eval-fn
                       {:host host :port port :code code
                        :ns ns :session session
                        :timeout-ms (or timeout_ms 30000)})]

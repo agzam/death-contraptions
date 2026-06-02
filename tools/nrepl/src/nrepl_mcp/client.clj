@@ -170,6 +170,42 @@
                   (throw e)))))]
     (do-eval true)))
 
+;; --- cljs/nbb await -------------------------------------------------------
+;; nbb's nREPL returns the promise object, not its resolved value. For cljs
+;; sessions we kick off a wrapper that stashes the resolved value into
+;; *nre-val* and flips *nre-pending*, then poll until done and read *nre-val*.
+;; The kickoff strings mirror a pattern validated against a live nbb session.
+;; promesa is built into nbb; we ensure it is required as `p` first.
+
+(def ^:private await-require "(require (quote [promesa.core :as p]))")
+(def ^:private await-pre "(do (def *nre-pending* true) (p/catch (p/let [v ")
+(def ^:private await-post
+  (str "] (def *nre-val* v) (def *nre-pending* false)) "
+       "(fn [e] (def *nre-val* (str \"ERR \" (or (.-message e) e))) (def *nre-pending* false))) "
+       ":nre/kicked)"))
+
+(defn await-kickoff-code
+  "Wrap CODE so its (possibly promise) result lands in *nre-val*. Pure."
+  [code]
+  (str await-pre code await-post))
+
+(defn eval-code-await
+  "Evaluate CODE on a cljs/nbb nREPL and resolve its promise before returning.
+   Ensures promesa, kicks off the wrapper, polls *nre-pending*, then returns
+   the *nre-val* read (same shape as eval-code)."
+  [{:keys [host port code session timeout-ms]
+    :or {host "localhost" timeout-ms 30000}}]
+  (let [ev (fn [c tmo] (eval-code {:host host :port port :code c :session session :timeout-ms tmo}))]
+    (ev await-require 5000)
+    (ev (await-kickoff-code code) 10000)
+    (let [deadline (+ (System/currentTimeMillis) timeout-ms)]
+      (loop []
+        (let [pend (:value (ev "*nre-pending*" 5000))]
+          (cond
+            (= pend "false") (ev "*nre-val*" 5000)
+            (< deadline (System/currentTimeMillis)) {:value "nil" :err "await timeout" :timed-out? true}
+            :else (do (Thread/sleep 150) (recur))))))))
+
 (defn close-all!
   []
   (reset! heartbeat-started? false)
