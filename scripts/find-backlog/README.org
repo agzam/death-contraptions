@@ -1,0 +1,31 @@
+#+TITLE: find-backlog
+
+Plain Babashka helper for the =find-backlog-work= ECA command.
+
+NOT an MCP server: it is not in =setup.bb='s server registry and is never
+written into =config.json=, so ECA does not load it into a session. The command
+shells out to it by absolute path, like the skills call =tools/monitor/monitor.bb=.
+It lives under =scripts/= (not =tools/=) to keep =tools/= reserved for MCP servers.
+
+* What it does
+One call returns the board context plus the pickable backlog candidates, so the
+command never hand-writes jq at runtime:
+
+- Resolves the board id and caches the static board facts - filter id,
+  story-points field, blocked status ids, columns - under
+  =~/.cache/find-backlog-work/= (30-day TTL).
+- Pulls the backlog (or active sprint) in rank order, fresh every run.
+- Filters to pickable - unassigned, statusCategory =new=, not in a hold lane -
+  and projects each candidate to the fields the command clusters on (key, rank,
+  type, priority, components, labels, parent, links, dates, points, summary).
+
+* Usage
+: bb scripts/find-backlog/find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh]
+
+Board id precedence (first hit wins): explicit numeric arg, =BACKLOG_BOARD= env,
+=:qlik-verify :jira :board= in =local-config.edn.gpg=, then the =3018= fallback.
+Prints one EDN map: ={:board ... :scope ... :total ... :pickable ... :candidates [...]}=.
+=--refresh= refetches the board configuration; the backlog is always fresh.
+
+* Tests
+: bb test
