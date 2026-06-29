@@ -204,8 +204,12 @@
       resp)))
 
 (defn splunk-search-async
-  "Run SPL search via async job API: create job, poll until done, fetch results."
-  [spl & {:keys [params max-results] :or {params {} max-results 100}}]
+  "Run SPL search via async job API: create job, poll until done, fetch results.
+  Budget is wall-clock (timeout-ms) so the poll's own HTTP round-trips count
+  toward it and the call stays under the MCP harness ceiling instead of
+  drifting past it as the old sleep-counting loop did."
+  [spl & {:keys [params max-results timeout-ms poll-ms]
+          :or {params {} max-results 100 timeout-ms 45000 poll-ms 1000}}]
   (let [;; 1. Create search job
         create-params (merge {"search" spl
                               "exec_mode" "normal"
@@ -214,12 +218,14 @@
         {:keys [status body]} (splunk-post "/services/search/jobs" create-params)]
     (if-not (= 201 status)
       {:error (str "Failed to create search job (HTTP " status "): " (pr-str body))}
-      (let [sid (get-in body [:sid])]
-        ;; 2. Poll for completion. Budget stays under typical MCP harness
-        ;; timeouts (~60s) so the server emits a distinct timeout error
-        ;; instead of going silent while the client gives up.
-        (loop [elapsed 0]
-          (Thread/sleep 2000)
+      (let [sid (get-in body [:sid])
+            deadline (+ (System/currentTimeMillis) timeout-ms)]
+        ;; 2. Poll for completion. Budget is wall-clock so a slow poll round-trip
+        ;; can't drift the total past the MCP harness ceiling (~60s); the server
+        ;; emits a distinct timeout error instead of going silent. First poll is
+        ;; immediate (no upfront sleep) so early-terminating searches return as
+        ;; soon as they finalize.
+        (loop []
           (let [{:keys [status body]} (splunk-get (str "/services/search/jobs/" sid))
                 state (when (map? body) (get-in body [:entry 0 :content :dispatchState]))
                 done? (= "DONE" state)
@@ -241,11 +247,12 @@
               (not (map? body))
               {:error (str "Unexpected non-JSON response from Splunk (HTTP " status ")")}
 
-              (< 45000 (+ elapsed 2000))
-              {:error "Search timed out after 45s"}
+              (< deadline (System/currentTimeMillis))
+              {:error (str "Search timed out after " (quot timeout-ms 1000) "s")}
 
               :else
-              (recur (+ elapsed 2000)))))))))
+              (do (Thread/sleep poll-ms)
+                  (recur)))))))))
 
 (defn splunk-search-export
   "Run SPL search via export endpoint (POST). Returns raw NDJSON body.
@@ -347,6 +354,15 @@
                              fields))))
                shown)))))))
 
+(defn limit-spl
+  "Append `| head n` so non-transforming searches early-terminate once n events
+  are found instead of scanning the whole window - the usual cause of timeouts.
+  Left untouched when the pipeline already caps rows with head/tail."
+  [spl n]
+  (if (re-find #"(?i)\|\s*(?:head|tail)\b" spl)
+    spl
+    (str spl " | head " n)))
+
 (defn do-search
   "Entry point for splunk-search tool. Uses the async job API so the server can
   poll for completion and respect max_results via server-side truncation."
@@ -354,9 +370,11 @@
   (try
     (ensure-credentials!)
     (let [max-n   (min (or (some-> max_results parse-long) 100) 10000)
-          spl     (if (str/starts-with? (str/trim query) "|")
-                    query
-                    (str "search " query))
+          spl     (limit-spl
+                   (if (str/starts-with? (str/trim query) "|")
+                     query
+                     (str "search " query))
+                   max-n)
           params  (cond-> {}
                     earliest_time       (assoc "earliest_time" earliest_time)
                     latest_time         (assoc "latest_time" latest_time)

@@ -97,6 +97,20 @@
           out (format-async-results results 2)]
       (is (re-find #"Showing 2 of 5" out)))))
 
+;;; ---------- limit-spl ----------
+
+(deftest limit-spl-test
+  (testing "appends head to a bare event search for early termination"
+    (is (= "search index=x | head 100" (limit-spl "search index=x" 100))))
+  (testing "leaves an explicit head/tail cap untouched"
+    (is (= "search index=x | head 5" (limit-spl "search index=x | head 5" 100)))
+    (is (= "index=x | tail 5" (limit-spl "index=x | tail 5" 100))))
+  (testing "head match is case- and space-insensitive"
+    (is (= "index=x |HEAD 3" (limit-spl "index=x |HEAD 3" 100))))
+  (testing "transforming search still gets a harmless row cap"
+    (is (= "search index=x | stats count | head 100"
+           (limit-spl "search index=x | stats count" 100)))))
+
 ;;; ---------- Tool schemas ----------
 
 (deftest tool-schemas-valid-test
