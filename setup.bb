@@ -64,7 +64,9 @@
    "qlik-kb"      {:command "qlik-kb/server.bb"
                    :platform :all}
    "nrepl"        {:command "nrepl/server.bb"
-                   :platform :all}})
+                   :platform :all}
+   "metrics"      {:command "metrics/server.bb"
+                   :platform :darwin}})
 
 (defn load-local-config
   "Read local-config.edn, trying .gpg first (via gpg --decrypt), then plain."
