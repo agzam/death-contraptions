@@ -51,9 +51,19 @@
   "Slack subdomains that are not real workspaces."
   #{"app" "files" "s" "pp" "api" "edgeapi" "slack-edge"})
 
+(defn- ws->host
+  "Resolve a root-state workspace entry to its Slack host.
+  Prefers the entry's url because Enterprise Grid orgs live at
+  *.enterprise.slack.com, not the <domain>.slack.com synthesized from :domain
+  (which 404s for grids). Falls back to <domain>.slack.com when no url exists."
+  [ws]
+  (or (some->> (get ws "url") (re-find #"https?://([^/]+)") second)
+      (when-let [domain (get ws "domain")]
+        (str domain ".slack.com"))))
+
 (defn- discover-workspaces-from-root-state
-  "Read workspace domains from Slack's storage/root-state.json.
-  Returns a seq of hostnames like (\"foo.slack.com\" \"bar.slack.com\"), or nil."
+  "Read workspace hosts from Slack's storage/root-state.json.
+  Returns a seq of hostnames like (\"foo.slack.com\" \"bar.enterprise.slack.com\"), or nil."
   []
   (try
     (let [state-file (str slack-data-dir "storage/root-state.json")
@@ -62,9 +72,7 @@
           workspaces (get state "workspaces")]
       (when (map? workspaces)
         (->> (vals workspaces)
-             (keep (fn [ws]
-                     (when-let [domain (get ws "domain")]
-                       (str domain ".slack.com"))))
+             (keep ws->host)
              (vec)
              (not-empty))))
     (catch Exception _ nil)))

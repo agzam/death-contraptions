@@ -78,6 +78,26 @@
   (testing "already-qualified host passes through"
     (is (= "myteam.slack.com" (normalize-host "myteam.slack.com")))))
 
+;;; ---------- ws->host ----------
+
+(deftest ws->host-enterprise-grid-test
+  (testing "Enterprise Grid workspace resolves to its url host, not <domain>.slack.com"
+    ;; Grids live at *.enterprise.slack.com; <domain>.slack.com 404s and yields no token.
+    (is (= "grid-qlikdev.enterprise.slack.com"
+           (ws->host {"domain" "grid-qlikdev"
+                      "url"    "https://grid-qlikdev.enterprise.slack.com/"})))))
+
+(deftest ws->host-regular-workspace-test
+  (testing "regular workspace uses its url host"
+    (is (= "clojurians.slack.com"
+           (ws->host {"domain" "clojurians"
+                      "url"    "https://clojurians.slack.com/"})))))
+
+(deftest ws->host-fallback-test
+  (testing "falls back to <domain>.slack.com when url is missing"
+    (is (= "myteam.slack.com" (ws->host {"domain" "myteam"})))
+    (is (nil? (ws->host {})))))
+
 ;;; ---------- tool schemas ----------
 
 (deftest tool-schemas-valid-test
