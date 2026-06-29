@@ -24,64 +24,10 @@
                               :host "your-ollama-host"
                               :remote-port 11434
                               :local-port 11434}}
-  :qlik-kb {:disabled? true
-            :qcs-api-token "your_qcs_api_token"}
   ;; Clojure/CLJS REPL bridge. Always-on: it is inert without a running nREPL,
   ;; and it is the channel the browser-repl powerhouse is driven through (start
   ;; a session with tools/browser-repl/launch.bb; see the browser-repl skill).
   :nrepl   {}}
-
- ;; Domain config for the qlik-verify skill, read from local-config.edn.gpg
- ;; at runtime (via elisp-eval / Emacs epa) so these secrets stay encrypted
- ;; at rest. Not consumed by setup.bb.
- :qlik-verify
- {:default-env "neel-stage"
-
-  ;; Shared logins, referenced by an env's :login-ref. The whole file is
-  ;; encrypted, so inline values are fine.
-  :credentials
-  {:qlik-login    {:username "you@qlik.com" :password "..."}
-   :sde-rootadmin {:username "rootadmin" :password "Qlik1234"}}
-
-  :defaults
-  ;; error-patterns match the STRUCTURED level (a bare "error"/"exception" false-
-  ;; matches benign lines like exception=null). correlation-headers are often
-  ;; absent on the browser side (Qlik injects trace ids at the gateway) - when
-  ;; empty, the backend watcher joins on tenant+endpoint+time instead.
-  {:monitor {:live? true :max-runtime 600 :max-matches 1
-             :digest-interval 30 :default-lookback "15m"
-             :error-patterns ["\"level\":\"error\"" "level=error" "\\bpanic:" "stacktrace"]
-             :correlation-headers ["x-request-id" "traceparent"]}
-   :report  {:format :org :target :org-roam
-             :attach-screenshots? true :attach-network? true}
-   :safety  {:redact-fields ["password" "token" "apiKey" "secret"]
-             :mutations :ask :artifact-prefix "verify-"
-             :cleanup :after-run :retention-days 7}
-   :paths   {:qlik-cli "qlik" :kubectl "kubectl" :stern "stern"}}
-
-  :environments
-  {"neel-stage" {:kind :stage :region :us
-                 :ui-url "https://pxju3otb4xrzt1w.us.qlik-stage.com"
-                 :login-ref :qlik-login
-                 :api-token "..."
-                 :default-space "your-space"
-                 :qlik-context "neel-stage"
-                 :splunk {:index "your_index" :sourcetypes ["..."]}
-                 :owner "Neel (QA)" :enabled? true}
-   "vohi"       {:kind :sde :region :eu
-                 :ui-url "https://erik.eu.vohi-vhost1-di-aws.pte.qlikdev.com"
-                 :login-ref :sde-rootadmin
-                 :api-token "..."
-                 :kube-context "vohi" :kubeconfig "~/.kube/vohi.yaml"
-                 :namespaces ["default"]
-                 :pod-selectors ["stitch-connections" "stitch-menagerie"
-                                 "stitch-orchestrator" "stitch-bobbin"
-                                 "target-qlik" "stitch-agent"]
-                 :splunk {:index "your_index"}
-                 :default-space "your-space" :owner "shared SDE" :enabled? true}}
-
-  :jira   {:base "https://qlik-dev.atlassian.net" :project "SAC" :board 3018}
-  :zephyr {:enabled? false :project "TDL"}}
 
  ;; Extra content appended to AGENTS.md (optional)
  ;; :agents-extra "..."
