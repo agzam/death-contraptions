@@ -1029,6 +1029,11 @@ JSON.stringify(b);
 
 ;;; --- MCP Dispatch ---
 
+(defn ex-text
+  "Human-readable exception text; some JVM exceptions carry no message."
+  [e]
+  (or (ex-message e) (str (class e))))
+
 (defn handle-request
   "Dispatches MCP JSON-RPC requests to the appropriate handler by method name.
   Returns the JSON-RPC response envelope or nil for notifications."
@@ -1049,31 +1054,72 @@ JSON.stringify(b);
     "tools/call"
     (let [{tool "name" args "arguments"} params]
       {:jsonrpc "2.0" :id id
-       :result (case tool
-                 "browser-list-tabs"       (list-tabs)
-                 "browser-read-active-tab" (read-active-tab (get args "query") (get args "format"))
-                 "browser-get-selection"   (get-selection)
-                 "browser-navigate"        (browser-navigate args)
-                 "browser-click"           (browser-click args)
-                 "browser-type"            (browser-type args)
-                 "browser-query"           (browser-query args)
-                 "browser-execute-js"      (browser-execute-js args)
-                 "browser-tab"             (browser-tab args)
-                 "browser-screenshot"      (browser-screenshot)
-                 "browser-network"         (browser-network args)
-                 "browser-console-logs"    (browser-console-logs args)
-                 "browser-wait"            (browser-wait args)
-                 "browser-scroll"          (browser-scroll args)
-                 {:content [{:type "text" :text (str "Unknown tool: " tool)}]
-                  :isError true})})
+       :result (try
+                 (case tool
+                   "browser-list-tabs"       (list-tabs)
+                   "browser-read-active-tab" (read-active-tab (get args "query") (get args "format"))
+                   "browser-get-selection"   (get-selection)
+                   "browser-navigate"        (browser-navigate args)
+                   "browser-click"           (browser-click args)
+                   "browser-type"            (browser-type args)
+                   "browser-query"           (browser-query args)
+                   "browser-execute-js"      (browser-execute-js args)
+                   "browser-tab"             (browser-tab args)
+                   "browser-screenshot"      (browser-screenshot)
+                   "browser-network"         (browser-network args)
+                   "browser-console-logs"    (browser-console-logs args)
+                   "browser-wait"            (browser-wait args)
+                   "browser-scroll"          (browser-scroll args)
+                   {:content [{:type "text" :text (str "Unknown tool: " tool)}]
+                    :isError true})
+                 (catch Exception e
+                   ;; Tool failure must reach the model as tool output
+                   ;; (isError), never kill the process.
+                   {:content [{:type "text"
+                               :text (str "Tool " tool " failed: " (ex-text e))}]
+                    :isError true}))})
 
     nil))
 
 ;;; --- Main Loop ---
 
+(defn log-err!
+  "Log to stderr; stdout is reserved for the JSON-RPC stream."
+  [context e]
+  (binding [*out* *err*]
+    (println "jxa-browser:" context (ex-text e))
+    (flush)))
+
+(defn rpc-error [id code message]
+  {:jsonrpc "2.0" :id id :error {:code code :message message}})
+
+(defn parse-request
+  "JSON line -> request map, nil (logged) when malformed."
+  [line]
+  (try (json/parse-string line)
+       (catch Exception e
+         (log-err! "unparsable request:" e))))
+
+(defn process-request
+  "Dispatch REQ; a handler exception becomes a JSON-RPC error response
+  instead of killing the server. Nil for notifications."
+  [req]
+  (try (handle-request req)
+       (catch Exception e
+         (log-err! "handler failed:" e)
+         (when-let [id (get req "id")]
+           (rpc-error id -32603 (ex-text e))))))
+
+(defn respond! [res]
+  (println (json/generate-string res))
+  (flush))
+
+(defn -main []
+  (->> (line-seq (java.io.BufferedReader. *in*))
+       (remove str/blank?)
+       (keep parse-request)
+       (keep process-request)
+       (run! respond!)))
+
 (when (= *file* (System/getProperty "babashka.file"))
-  (doseq [line (line-seq (java.io.BufferedReader. *in*))]
-    (when-not (str/blank? line)
-      (when-let [res (handle-request (json/parse-string line))]
-        (println (json/generate-string res))
-        (flush)))))
+  (-main))

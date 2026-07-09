@@ -67,3 +67,34 @@
     (let [tool-list (get-in resp [:result :tools])]
       (is (= (count tools) (count tool-list)))
       (is (every? #(string? (:name %)) tool-list)))))
+
+;; Regression: gptel once serialized omitted optional args as {}, the
+;; resulting ClassCastException killed the whole server process.
+
+(deftest handle-request-tools-call-exception-test
+  (testing "a throwing tool handler yields isError result, not a dead server"
+    (with-redefs [fetch-active-tab-content (fn [] {:url "u" :title "t" :html "<p>hi</p>"})
+                  html->text (fn [_] "hi")]
+      (let [resp (handle-request {"id" 3 "method" "tools/call"
+                                  "params" {"name" "browser-read-active-tab"
+                                            "arguments" {"query" {}}}})]
+        (is (= 3 (:id resp)))
+        (is (true? (get-in resp [:result :isError])))
+        (is (str/includes? (get-in resp [:result :content 0 :text])
+                           "browser-read-active-tab failed"))))))
+
+(deftest process-request-handler-throw-test
+  (testing "handler exception becomes JSON-RPC error; notifications stay silent"
+    (with-redefs [handle-request (fn [_] (throw (ex-info "boom" {})))
+                  log-err! (fn [_ _])]
+      (let [resp (process-request {"id" 9 "method" "whatever"})]
+        (is (= 9 (:id resp)))
+        (is (= -32603 (get-in resp [:error :code])))
+        (is (str/includes? (get-in resp [:error :message]) "boom")))
+      (is (nil? (process-request {"method" "notifications/x"}))))))
+
+(deftest parse-request-test
+  (is (= {"id" 1 "method" "x"} (parse-request "{\"id\":1,\"method\":\"x\"}")))
+  (testing "malformed json is dropped, not thrown"
+    (with-redefs [log-err! (fn [_ _])]
+      (is (nil? (parse-request "not json"))))))
