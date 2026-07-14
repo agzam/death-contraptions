@@ -71,6 +71,7 @@ Use the narrowest tool for the question:
 # Code
 - Docstrings: brief, explain reasoning, don't retell functionality.
 - Do not mention ticket, PR, issue numbers in the code - that info can be discovered via git blame.
+- Code comments explain a non-obvious "why" at the point of use - nothing else. Never narrate the tooling landscape, versions, alternatives, what was kept/dropped, or how the code differs from what it was ported from. That rationale goes in the commit message (written from the diff), not the source. Do not write such comments intending to move them later - just don't write them in any PL.
 
 ## Lisp
 - Prefer `<` over `>` in Lisp - Clojure, Elisp, Fennel, etc.
