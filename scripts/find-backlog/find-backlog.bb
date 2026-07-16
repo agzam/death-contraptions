@@ -12,8 +12,14 @@
 ;; Not an MCP server: invoked by absolute path from the command, never
 ;; registered in setup.bb or loaded into a session.
 ;;
-;; Usage: bb find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh]
+;; Usage: bb find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh] [--plan]
 ;; Prints one EDN map: {:board {...} :scope s :total N :pickable M :candidates [...]}
+;;
+;; --plan: planning projection for the sprint-planning-prep command - the active
+;; sprint's unfinished tickets (done/rejected dropped) first, then the whole
+;; backlog in rank order, no pickable filter. Each candidate carries :assignee, a
+;; :sprint flag, and a clipped :description; :pickable is omitted. Reuses the same
+;; cached board facts, so the two commands never re-resolve the board.
 
 (require '[babashka.process :as proc]
          '[cheshire.core :as json]
@@ -31,18 +37,19 @@
 ;; ---------- pure: cli ----------
 
 (defn parse-cli
-  "Parse [<board-id>] [--scope x] [--refresh] into {:board :scope :refresh?}."
+  "Parse [<board-id>] [--scope x] [--refresh] [--plan] into {:board :scope :refresh? :plan?}."
   [args]
-  (loop [xs (seq args) board nil scope "backlog" refresh? false]
+  (loop [xs (seq args) board nil scope "backlog" refresh? false plan? false]
     (if (empty? xs)
-      {:board board :scope scope :refresh? refresh?}
+      {:board board :scope scope :refresh? refresh? :plan? plan?}
       (let [x (first xs)]
         (cond
-          (= x "--refresh") (recur (rest xs) board scope true)
-          (= x "--scope")   (recur (drop 2 xs) board (or (second xs) scope) refresh?)
-          (str/starts-with? x "--") (recur (rest xs) board scope refresh?)
-          (nil? board)      (recur (rest xs) x scope refresh?)
-          :else             (recur (rest xs) board scope refresh?))))))
+          (= x "--refresh") (recur (rest xs) board scope true plan?)
+          (= x "--plan")    (recur (rest xs) board scope refresh? true)
+          (= x "--scope")   (recur (drop 2 xs) board (or (second xs) scope) refresh? plan?)
+          (str/starts-with? x "--") (recur (rest xs) board scope refresh? plan?)
+          (nil? board)      (recur (rest xs) x scope refresh? plan?)
+          :else             (recur (rest xs) board scope refresh? plan?))))))
 
 ;; ---------- pure: board context ----------
 
@@ -116,6 +123,33 @@
        (map-indexed (fn [i iss] [(inc i) iss]))
        (filter (fn [[_ iss]] (pickable? blocked-ids iss)))
        (mapv (fn [[rank iss]] (project story-points-field rank iss)))))
+
+(def ^:private max-desc-chars 1600)
+
+(defn- clip
+  "Drop carriage returns and cap s at n chars so descriptions stay readable in EDN."
+  [s n]
+  (let [s (str/replace (str s) "\r" "")]
+    (if (< n (count s)) (str (subs s 0 n) "...") s)))
+
+(defn active?
+  "False for done-category statuses (Done, Rejected) - finished work planning skips."
+  [issue]
+  (not= "done" (get-in issue [:fields :status :statusCategory :key])))
+
+(defn plan-candidates
+  "Project every issue in rank order with no pickable filter, adding assignee, a
+  :sprint flag (true when the key is in sprint-keys), and a clipped description -
+  what the planning command explains."
+  [story-points-field sprint-keys issues]
+  (->> issues
+       (map-indexed
+        (fn [i iss]
+          (assoc (project story-points-field (inc i) iss)
+                 :assignee (get-in iss [:fields :assignee :displayName])
+                 :sprint (contains? sprint-keys (:key iss))
+                 :description (some-> (get-in iss [:fields :description]) (clip max-desc-chars)))))
+       vec))
 
 ;; ---------- effects: jira / gpg / cache ----------
 
@@ -201,7 +235,7 @@
     ctx))
 
 (defn -main [& raw]
-  (let [{:keys [board scope refresh?]} (parse-cli raw)]
+  (let [{:keys [board scope refresh? plan?]} (parse-cli raw)]
     (if (and board (not (re-matches #"\d+" (str board))))
       (binding [*out* *err*]
         (println (str "find-backlog: '" board "' is not a numeric board id; "
@@ -209,13 +243,25 @@
         (System/exit 2))
       (let [ctx (board-context! board refresh?)
             spf (:story-points-field ctx)
-            issues (fetch-issues (:board-id ctx) scope (field-list spf))
-            candidates (pickable-candidates spf (set (:blocked-status-ids ctx)) issues)]
-        (prn {:board (dissoc ctx :cached-at)
+            board-id (:board-id ctx)]
+        (prn
+         (if plan?
+           (let [fields (str (field-list spf) ",description")
+                 sprint (vec (filter active? (fetch-sprint board-id fields)))
+                 sprint-keys (into #{} (map :key) sprint)
+                 backlog (fetch-backlog board-id fields)
+                 issues (into sprint (remove #(sprint-keys (:key %)) backlog))]
+             {:board (dissoc ctx :cached-at)
+              :total (count issues)
+              :sprint (count sprint)
+              :candidates (plan-candidates spf sprint-keys issues)})
+           (let [issues (fetch-issues board-id scope (field-list spf))
+                 candidates (pickable-candidates spf (set (:blocked-status-ids ctx)) issues)]
+             {:board (dissoc ctx :cached-at)
               :scope scope
               :total (count issues)
               :pickable (count candidates)
-              :candidates candidates})))))
+              :candidates candidates})))))))
 
 (when (= *file* (System/getProperty "babashka.file"))
   (apply -main *command-line-args*))

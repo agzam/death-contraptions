@@ -41,11 +41,12 @@
 ;; ---------- cli ----------
 
 (deftest parse-cli-test
-  (is (= {:board nil :scope "backlog" :refresh? false} (parse-cli [])))
-  (is (= {:board "3018" :scope "backlog" :refresh? false} (parse-cli ["3018"])))
-  (is (= {:board nil :scope "backlog" :refresh? true} (parse-cli ["--refresh"])))
-  (is (= {:board "2985" :scope "both" :refresh? false} (parse-cli ["--scope" "both" "2985"])))
-  (is (= {:board "2985" :scope "sprint" :refresh? true} (parse-cli ["2985" "--scope" "sprint" "--refresh"]))))
+  (is (= {:board nil :scope "backlog" :refresh? false :plan? false} (parse-cli [])))
+  (is (= {:board "3018" :scope "backlog" :refresh? false :plan? false} (parse-cli ["3018"])))
+  (is (= {:board nil :scope "backlog" :refresh? true :plan? false} (parse-cli ["--refresh"])))
+  (is (= {:board "2985" :scope "both" :refresh? false :plan? false} (parse-cli ["--scope" "both" "2985"])))
+  (is (= {:board "2985" :scope "sprint" :refresh? true :plan? false} (parse-cli ["2985" "--scope" "sprint" "--refresh"])))
+  (is (= {:board "3018" :scope "backlog" :refresh? false :plan? true} (parse-cli ["3018" "--plan"]))))
 
 ;; ---------- board context ----------
 
@@ -105,3 +106,27 @@
       (is (= 1 (count out)))
       (is (= "SAC-1" (:key (first out))))
       (is (= 2 (:rank (first out)))))))
+
+(deftest active?-test
+  (is (true?  (boolean (active? issue))))
+  (is (false? (boolean (active? issue-done)))))
+
+(deftest plan-candidates-test
+  (testing "keeps every issue in rank order, tags sprint membership, adds assignee + description"
+    (let [a (assoc issue-assigned :key "SAC-1")
+          b (assoc (assoc-in issue [:fields :description] "hello") :key "SAC-2")
+          out (plan-candidates "customfield_10034" #{"SAC-1"} [a b])]
+      (is (= 2 (count out)))
+      (is (= [1 2] (mapv :rank out)))
+      (is (true?  (:sprint (first out))))
+      (is (false? (:sprint (second out))))
+      (is (= "Someone" (:assignee (first out))))
+      (is (nil? (:assignee (second out))))
+      (is (= "hello" (:description (second out))))
+      (is (= "Do a thing" (:summary (first out))))))
+  (testing "clips long descriptions and strips carriage returns"
+    (let [long-desc (apply str (repeat 2000 "x"))
+          out (plan-candidates "customfield_10034" #{}
+                               [(assoc-in issue [:fields :description] (str "a\r\nb" long-desc))])]
+      (is (< (count (:description (first out))) 1700))
+      (is (not (.contains (:description (first out)) "\r"))))))

@@ -8,23 +8,31 @@ shells out to it by absolute path, like the skills call =tools/monitor/monitor.b
 It lives under =scripts/= (not =tools/=) to keep =tools/= reserved for MCP servers.
 
 * What it does
-One call returns the board context plus the pickable backlog candidates, so the
-command never hand-writes jq at runtime:
+One call returns the board context plus its backlog candidates, so the command
+never hand-writes jq at runtime. Two ECA commands share it: =find-backlog-work=
+(default projection) and =sprint-planning-prep= (=--plan= projection).
 
 - Resolves the board id and caches the static board facts - filter id,
   story-points field, blocked status ids, columns - under
-  =~/.cache/find-backlog-work/= (30-day TTL).
+  =~/.cache/find-backlog-work/= (30-day TTL). Both commands reuse this cache, so
+  the board is resolved once, not per command.
 - Pulls the backlog (or active sprint) in rank order, fresh every run.
-- Filters to pickable - unassigned, statusCategory =new=, not in a hold lane -
-  and projects each candidate to the fields the command clusters on (key, rank,
-  type, priority, components, labels, parent, links, dates, points, summary).
+- Default: filters to pickable - unassigned, statusCategory =new=, not in a hold
+  lane - and projects each candidate to the fields the command clusters on (key,
+  rank, type, priority, components, labels, parent, links, dates, points, summary).
+- =--plan=: no pickable filter - the active sprint's unfinished tickets
+  (done/rejected dropped) first, then the whole backlog in rank order. Adds
+  =:assignee=, a =:sprint= flag, and a clipped =:description=. For walking the
+  board in sprint planning.
 
 * Usage
-: bb scripts/find-backlog/find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh]
+: bb scripts/find-backlog/find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh] [--plan]
 
 Board id precedence (first hit wins): explicit numeric arg, =BACKLOG_BOARD= env,
 =:qlik-verify :jira :board= in =local-config.edn.gpg=, then the =3018= fallback.
 Prints one EDN map: ={:board ... :scope ... :total ... :pickable ... :candidates [...]}=.
+=--plan= ignores =--scope=, drops =:scope=/=:pickable=, adds a =:sprint= count, and
+every candidate carries =:sprint= and =:description=.
 =--refresh= refetches the board configuration; the backlog is always fresh.
 
 * Tests
