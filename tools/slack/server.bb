@@ -235,6 +235,25 @@
         (do (ensure-credentials! true)
             (if (contains? @credentials h) h (not-found)))))))
 
+(defn remap-host
+  "Pure: choose the host we actually hold credentials for. Slack search returns
+  <workspace>.slack.com permalinks, but Enterprise Grid credentials live under
+  <name>.enterprise.slack.com; match exactly, else by workspace stem, else fall
+  back to the default host, so a thread fetched from a search result just works."
+  [host cred-hosts default-host]
+  (let [stem (first (str/split (str host) #"\."))]
+    (or (some #{host} cred-hosts)
+        (some (fn [h] (when (str/includes? (first (str/split h #"\.")) stem) h)) cred-hosts)
+        default-host
+        host)))
+
+(defn- credentialed-host-for
+  "Resolve a permalink-derived host to a credentialed one (see remap-host),
+  refreshing credentials first."
+  [host]
+  (ensure-credentials!)
+  (remap-host host (keys @credentials) @default-host))
+
 ;;; ---------- API layer ----------
 
 (def ^:private token-error?
@@ -465,8 +484,8 @@
   (try
     (let [parsed    (or (parse-slack-url url)
                        (throw (ex-info (str "Could not parse Slack URL: " url) {})))
-          {:keys [host channel-id ts thread-ts]} parsed
-          _         (resolve-host host)
+          {:keys [channel-id ts thread-ts] permalink-host :host} parsed
+          host      (credentialed-host-for permalink-host)
           parent-ts (or thread-ts ts)
           tresp     (api-request host "conversations.replies"
                                  {"channel" channel-id

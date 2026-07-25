@@ -21,10 +21,10 @@ Keep the response to the rundown itself. Do not narrate tool calls, do not fetch
 Run the shared helper with `--plan`:
 
 ```
-bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/find-backlog/find-backlog.bb [<board-id>] --plan
+bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] --plan
 ```
 
-It resolves the board (reusing the static facts - name, story-points field, columns - cached under `~/.cache/find-backlog-work/`, the same cache `find-backlog-work` fills, so repeat runs skip the board lookup), then returns the active sprint's unfinished tickets followed by the whole backlog, each projected. One EDN map:
+It resolves the board (reusing the static facts - name, story-points field, columns - cached under `~/.cache/jira-board/`, the same cache the sibling commands fill, so repeat runs skip the board lookup), then returns the active sprint's unfinished tickets followed by the whole backlog, each projected. One EDN map:
 
 - `:board` - `{:board-id :name :type :filter-id :story-points-field :blocked-status-ids :columns}`.
 - `:total` - ticket count; `:sprint` - how many are the active-sprint carryover (listed first).
@@ -70,3 +70,4 @@ A few lines, not a table:
 - which backlog band is the live focus (top) versus the older or parked tail.
 - obvious clusters that move together (shared epic via `parent`, shared service, or theme), so the room can batch them.
 - tickets that can't be pointed yet, by key: empty/vague (groom) and blocked-on-external (track).
+).

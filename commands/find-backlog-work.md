@@ -16,10 +16,10 @@ All discovery here is read-only. The `jira` CLI is go-jira with keyring auth: `j
 
 ## Step 1: Gather board + candidates (one helper call)
 
-Run the helper - it resolves the board (caching the static board facts under `~/.cache/find-backlog-work/`), pulls the backlog (or sprint) in rank order, and filters to pickable, all in code so nothing is hand-written at runtime:
+Run the helper - it resolves the board (caching the static board facts under `~/.cache/jira-board/`), pulls the backlog (or sprint) in rank order, and filters to pickable, all in code so nothing is hand-written at runtime:
 
 ```
-bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/find-backlog/find-backlog.bb [<board-id>] [--scope backlog|sprint|both] [--refresh]
+bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] [--scope backlog|sprint|both] [--refresh]
 ```
 
 It prints one EDN map:

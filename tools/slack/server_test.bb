@@ -40,6 +40,20 @@
     (is (nil? (parse-slack-url "https://example.com/foo")))
     (is (nil? (parse-slack-url "")))))
 
+;;; ---------- remap-host (Enterprise Grid permalink domains) ----------
+
+(deftest remap-host-test
+  (let [grid ["grid-qlikdev.enterprise.slack.com"]]
+    (testing "a search permalink's <ws>.slack.com remaps to the credentialed Grid host by stem"
+      (is (= "grid-qlikdev.enterprise.slack.com"
+             (remap-host "qlikdev.slack.com" grid nil))))
+    (testing "an exact credentialed host is kept as-is"
+      (is (= "acme.slack.com" (remap-host "acme.slack.com" ["acme.slack.com"] nil))))
+    (testing "no match falls back to the default host"
+      (is (= "default.slack.com" (remap-host "unknown.slack.com" ["acme.slack.com"] "default.slack.com"))))
+    (testing "no match and no default returns the original (api-request then surfaces a clear error)"
+      (is (= "unknown.slack.com" (remap-host "unknown.slack.com" ["acme.slack.com"] nil))))))
+
 ;;; ---------- make-permalink ----------
 
 (deftest make-permalink-test
