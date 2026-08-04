@@ -18,8 +18,14 @@
  {:slack {:default-host "your-workspace.slack.com"}
   :splunk {:disabled? true
            :host "your-instance.splunkcloud.com"}
+  ;; :model, :doc-prefix and :query-prefix must move together: each embedding
+  ;; model is trained with its own document/query prefixes, and mismatching
+  ;; them measurably degrades ranking. Changing :model rebuilds the index.
   :org-roam-mcp {:disabled? true
                  :ollama-url "http://localhost:11434"
+                 :model "embeddinggemma"
+                 :doc-prefix "title: none | text: "
+                 :query-prefix "task: search result | query: "
                  :ssh-tunnel {:enabled false
                               :host "your-ollama-host"
                               :remote-port 11434

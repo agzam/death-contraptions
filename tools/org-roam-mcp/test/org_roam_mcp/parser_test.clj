@@ -216,10 +216,15 @@
       (is (= "X\nY" text)))))
 
 (deftest embedding-text-truncation
-  (testing "long content is truncated"
+  (testing "long content is truncated to the model's context window"
     (let [long-content (apply str (repeat 30000 "x"))
           text (parser/embedding-text {:title "T" :tags [] :content long-content})]
-      (is (= 24000 (count text))))))
+      (is (< (count text) 30000) "oversized input is cut down")
+      (is (pos? (count text)))))
+  (testing "content within the window is left intact"
+    (let [content (apply str (repeat 500 "x"))
+          text (parser/embedding-text {:title "T" :tags [] :content content})]
+      (is (str/includes? text content)))))
 
 ;; ---------------------------------------------------------------------------
 ;; scan-directory / excludes

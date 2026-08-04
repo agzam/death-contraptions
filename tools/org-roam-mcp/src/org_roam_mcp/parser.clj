@@ -307,8 +307,10 @@
                        nil)))))))
 
 (def ^:private max-embed-chars
-  "~8192 tokens * 3 chars/token = ~24K chars, conservative limit."
-  24000)
+  "Tracks the embedding model's context window (2048 tokens, ~4 chars/token).
+   Text beyond it is discarded server-side, so sending more only costs
+   tokenization time."
+  8000)
 
 (def min-embed-chars
   "Minimum embedding text length to produce a useful vector.
