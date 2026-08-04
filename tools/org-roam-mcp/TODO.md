@@ -4,7 +4,7 @@
 
 - [x] deps.edn, config.edn, start.sh (cd to SCRIPT_DIR, stderr to server.log)
 - [x] util.clj, parser.clj, embeddings.clj, index.clj, secondary.clj
-- [x] core.clj - MCP server, 7 tools, JSON-RPC stdio loop
+- [x] core.clj - MCP server, 8 tools, JSON-RPC stdio loop
 - [x] watcher.clj - native macOS FSEvents via io.methvin/directory-watcher 0.18.0
 - [x] emacs.clj - emacsclient wrapper with timeout and error handling
 - [x] notes-create - three modes: journal (vulpea), heading (parent-id), file (standalone)
@@ -25,15 +25,17 @@
 - [x] embed-batch consistency - :as :string + :throw-exceptions? false across all embed fns
 - [x] Graceful recovery on corrupt HNSW index - load-index catches deserialization errors, deletes corrupt file, falls back to full rebuild
 - [x] Clean JVM exit on stdin EOF - stdio loop wraps in try/finally + System/exit so non-daemon executor threads don't keep the JVM alive after the MCP client disconnects; watcher stop fn drains processor + save executors before the shutdown hook's final save-index! so they can't race on meta.edn
-- [x] 32 tests, 107 assertions
+- [x] Argument validation at tools/call dispatch - unknown args rejected with accepted list, missing/null required args named, type/enum checks, additionalProperties: false on all schemas
+- [x] limit as canonical max-results arg on search tools, k kept as deprecated alias (both at once is an error)
+- [x] 56 tests, 217 assertions
 
 ## Bugs
 
-- [ ] Empty error messages everywhere - `.getMessage` returns nil for many Java exceptions (ConnectException, NullPointerException, nested ex-info). Use `(or (ex-message e) (str (class e)))` in all catch blocks: core.clj:321, watcher.clj:26, and anywhere else `.getMessage` is used raw.
+- [ ] Empty error messages everywhere - `.getMessage` returns nil for many Java exceptions (ConnectException, NullPointerException, nested ex-info). Use `(or (ex-message e) (str (class e)))` in all catch blocks: core.clj and watcher.clj still use `.getMessage` raw in several places.
 - [ ] notes-read fails for non-embedded nodes - resolves title via secondary index, gets node-id, then demands HNSW item (which doesn't exist for short chunks or embed-failed nodes). notes-read should fall back to secondary metadata + direct file read via emacsclient/org-id-find.
 - [ ] notes-search crashes when Ollama is down instead of degrading - graph-enriched search (title match, backlinks, outgoing) doesn't need embeddings but the code calls embed-query unconditionally before any graph logic. Should catch embed failure, skip semantic portion, return graph+structural results with a `:degraded` flag.
 - [ ] Watcher removes old HNSW items before re-embedding succeeds - process-file-change! deletes existing items (watcher.clj:66-71) then attempts embed. On embed failure, nodes are silently lost. Should defer removal until new items are ready, or restore old items on failure.
-- [ ] Error responses lack recovery hints - "Node not in index" should suggest "try notes-reindex"; embed failures should mention Ollama URL and suggest checking connectivity. Agents can't guess corrective actions.
+- [ ] Error responses lack recovery hints - "Node not in index" should suggest "try notes-reindex"; embed failures should mention Ollama URL and suggest checking connectivity. Agents can't guess corrective actions. (Argument errors are self-describing now; this remains for index/Ollama failures.)
 
 ## Should do
 
@@ -42,8 +44,9 @@
 
 ## Nice to have
 
-- [ ] annotator.clj - entity recognition, disambiguation, three-layer output
-- [ ] notes-annotate tool + Emacs UI for interactive entity linking
+- [x] annotate.clj + notes-annotate tool - entity recognition, three-layer output
+- [ ] Context-based candidate ranking for notes-annotate (embed supplied context, score ambiguous candidates)
+- [ ] Emacs UI for interactive entity linking
 - [ ] Incremental index compaction
 - [ ] Emacs integration package (elisp UI: org-roam-mcp-search with minibuffer)
 - [ ] Index other corpora: HN comments, Reddit history, GitHub org source code

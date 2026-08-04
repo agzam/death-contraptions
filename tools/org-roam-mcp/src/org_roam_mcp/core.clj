@@ -5,6 +5,7 @@
             [clojure.string :as str]
             [cheshire.core :as json]
             [org-roam-mcp.util :as util]
+            [org-roam-mcp.annotate :as annotate]
             [org-roam-mcp.index :as idx]
             [org-roam-mcp.secondary :as sec]
             [org-roam-mcp.embeddings :as emb]
@@ -40,10 +41,13 @@
       :links {:type "array"
               :items {:type "string"}
               :description "Filter: only notes linking to ALL of these nodes (by title, alias, or ID)"}
-      :k     {:type "integer"
+      :limit {:type "integer"
               :description "Max results to return (default: 10)"}
+      :k     {:type "integer"
+              :description "Deprecated alias for limit"}
       :depth {:type "integer"
-              :description "Graph traversal depth for title matches (1 or 2, default: 1)"}}}}
+              :description "Graph traversal depth for title matches (1 or 2, default: 1)"}}
+     :additionalProperties false}}
 
    {:name "notes-backlinks"
     :description
@@ -53,7 +57,8 @@
      :properties
      {:node {:type "string"
              :description "Node title, alias, or UUID to find backlinks for"}}
-     :required ["node"]}}
+     :required ["node"]
+     :additionalProperties false}}
 
    {:name "notes-read"
     :description
@@ -63,7 +68,8 @@
      :properties
      {:id    {:type "string" :description "Org-roam node UUID"}
       :title {:type "string" :description "Note title (alternative to id)"}
-      :path  {:type "string" :description "File path (alternative to id)"}}}}
+      :path  {:type "string" :description "File path (alternative to id)"}}
+     :additionalProperties false}}
 
    {:name "notes-search-related"
     :description
@@ -71,9 +77,22 @@
     :inputSchema
     {:type "object"
      :properties
-     {:node {:type "string" :description "Node title, alias, or UUID"}
-      :k    {:type "integer" :description "Max results (default: 10)"}}
-     :required ["node"]}}
+     {:node  {:type "string" :description "Node title, alias, or UUID"}
+      :limit {:type "integer" :description "Max results (default: 10)"}
+      :k     {:type "integer" :description "Deprecated alias for limit"}}
+     :required ["node"]
+     :additionalProperties false}}
+
+   {:name "notes-annotate"
+    :description
+    "Identify entities in text that match existing note titles/aliases. Returns annotation spans with candidate node links, plus annotated-text (top candidate applied) and safe-annotated-text (only unambiguous matches applied). Use to turn plain text into linked org-mode content."
+    :inputSchema
+    {:type "object"
+     :properties
+     {:text {:type "string"
+             :description "Plain text to scan for entities matching note titles/aliases"}}
+     :required ["text"]
+     :additionalProperties false}}
 
    {:name "notes-reindex"
     :description
@@ -82,7 +101,8 @@
     {:type "object"
      :properties
      {:path {:type "string"
-             :description "File to re-index (optional, omit for full scan)"}}}}
+             :description "File to re-index (optional, omit for full scan)"}}
+     :additionalProperties false}}
 
    {:name "notes-create"
     :description
@@ -104,7 +124,8 @@
                 :description "YYYY-MM-DD date (journal mode only, default: today)"}
       :parent-id {:type "string"
                   :description "Node ID to insert under (heading mode only)"}}
-     :required ["title" "content"]}}
+     :required ["title" "content"]
+     :additionalProperties false}}
 
    {:name "notes-edit"
     :description
@@ -121,7 +142,100 @@
       :mode    {:type "string"
                 :enum ["append" "replace"]
                 :description "Edit mode (default: append)"}}
-     :required ["content"]}}])
+     :required ["content"]
+     :additionalProperties false}}])
+
+;; ---------------------------------------------------------------------------
+;; Argument validation
+;; ---------------------------------------------------------------------------
+
+(defn- type-desc
+  "Human-readable JSON type of a property spec."
+  [spec]
+  (if (= "array" (:type spec))
+    (str "array of " (get-in spec [:items :type] "any"))
+    (:type spec)))
+
+(defn- json-type-ok?
+  "Check a parsed-JSON value against a property spec's :type (and :items)."
+  [spec v]
+  (case (:type spec)
+    "string"  (string? v)
+    "integer" (int? v)
+    "number"  (number? v)
+    "boolean" (boolean? v)
+    "array"   (and (sequential? v)
+                   (or (nil? (:items spec))
+                       (every? #(json-type-ok? (:items spec) %) v)))
+    "object"  (map? v)
+    true))
+
+(defn validate-args
+  "Validate tools/call arguments against a tool's inputSchema. Returns nil
+   when valid, else an :isError result spelling out the exact contract:
+   unknown args are rejected rather than silently ignored (they used to be
+   dropped, so typos changed behavior without any signal), missing/null
+   required args are named instead of surfacing as NPEs, and type/enum
+   mismatches are reported."
+  [{:keys [inputSchema] tool-name :name} args]
+  (let [props    (into {} (map (fn [[k v]] [(name k) v])) (:properties inputSchema))
+        required (:required inputSchema)
+        args     (or args {})
+        unknown  (sort (remove #(contains? props %) (keys args)))
+        missing  (filterv #(nil? (get args %)) required)
+        invalid  (keep (fn [[k v]]
+                         (when-let [spec (get props k)]
+                           (when (some? v)
+                             (cond
+                               (not (json-type-ok? spec v))
+                               (str k " must be " (type-desc spec) ", got: " (pr-str v))
+
+                               (and (:enum spec) (not (some #(= % v) (:enum spec))))
+                               (str k " must be one of " (str/join "/" (:enum spec))
+                                    ", got: " (pr-str v))))))
+                       args)
+        problems (concat
+                  (when (seq missing)
+                    [(str "missing required: " (str/join ", " missing))])
+                  (when (seq unknown)
+                    [(str "unknown: " (str/join ", " unknown))])
+                  invalid)]
+    (when (seq problems)
+      {:content
+       [{:type "text"
+         :text (str tool-name " argument error - " (str/join "; " problems)
+                    ". Accepted arguments: " (str/join ", " (sort (keys props)))
+                    (when (seq required)
+                      (str " (required: " (str/join ", " required) ")")))}]
+       :isError true})))
+
+(def ^:private arg-aliases
+  "Deprecated arg spellings still accepted per tool: {tool {alias canonical}}."
+  {"notes-search"         {"k" "limit"}
+   "notes-search-related" {"k" "limit"}})
+
+(defn normalize-args
+  "Rewrite deprecated alias args onto their canonical names.
+   Returns {:args ...}, or {:error ...} when both spellings were given."
+  [tool-name args]
+  (reduce-kv
+   (fn [acc alias canonical]
+     (let [args (:args acc)]
+       (cond
+         (nil? (get args alias)) acc
+
+         (some? (get args canonical))
+         (reduced {:error {:content
+                           [{:type "text"
+                             :text (str tool-name ": provide either " canonical
+                                        " or its alias " alias ", not both")}]
+                           :isError true}})
+
+         :else {:args (-> args
+                          (dissoc alias)
+                          (assoc canonical (get args alias)))})))
+   {:args (or args {})}
+   (get arg-aliases tool-name)))
 
 ;; ---------------------------------------------------------------------------
 ;; Tool implementations
@@ -190,10 +304,10 @@
 
 (defn do-notes-search
   "Semantic + graph-enriched search, with optional tag/link filters."
-  [{:strs [query tags links k depth]}]
-  (let [k (or k 10)
+  [{:strs [query tags links limit depth]}]
+  (let [limit (or limit 10)
         graph-depth (min (or depth 1) 2)
-        over-fetch (* k 10)]
+        over-fetch (* limit 10)]
     (cond
       ;; Semantic + graph-enriched search
       query
@@ -229,7 +343,7 @@
             combined (into (vec graph-results) deduped-semantic)]
         {:content [{:type "text"
                     :text (json/generate-string
-                           {:results (mapv result-map (take k combined))})}]})
+                           {:results (mapv result-map (take limit combined))})}]})
 
       ;; Structural-only query
       (or (seq tags) (seq links))
@@ -255,7 +369,7 @@
             results (keep (fn [id]
                             (when-let [item (idx/get-item @hnsw-index id)]
                               (result-map (idx/item->map item))))
-                          (take k result-ids))]
+                          (take limit result-ids))]
         {:content [{:type "text"
                     :text (json/generate-string {:results (vec results)})}]})
 
@@ -290,7 +404,11 @@
                                   (.id ^org_roam_mcp.index.NoteItem item)))
                               (idx/all-items @hnsw-index)))))]
     (if-not node-id
-      {:content [{:type "text" :text "Note not found"}] :isError true}
+      {:content [{:type "text"
+                  :text (if (and (nil? id) (nil? title) (nil? path))
+                          "Provide one of: id, title, path"
+                          (str "Note not found: " (or id title path)))}]
+       :isError true}
       (let [item (idx/get-item @hnsw-index node-id)]
         (if-not item
           {:content [{:type "text" :text (str "Node not in index: " node-id)}] :isError true}
@@ -336,19 +454,26 @@
 
 (defn do-notes-search-related
   "Find semantically similar notes by reusing the source node's embedding."
-  [{:strs [node k]}]
-  (let [k (or k 10)]
+  [{:strs [node limit]}]
+  (let [limit (or limit 10)]
     (if-let [node-id (resolve-node-id node)]
       (if-let [item (idx/get-item @hnsw-index node-id)]
         (let [vec (.vector ^org_roam_mcp.index.NoteItem item)
-              results (idx/search @hnsw-index vec (inc k))
+              results (idx/search @hnsw-index vec (inc limit))
               ;; Exclude the source node itself
               filtered (filterv #(not= (:node-id %) node-id) results)]
           {:content [{:type "text"
                       :text (json/generate-string
-                             {:results (mapv result-map (take k filtered))})}]})
+                             {:results (mapv result-map (take limit filtered))})}]})
         {:content [{:type "text" :text (str "Node not in index: " node-id)}] :isError true})
       {:content [{:type "text" :text (str "Node not found: " node)}] :isError true})))
+
+(defn do-notes-annotate
+  "Identify entities in text matching known note titles/aliases."
+  [{:strs [text]}]
+  {:content [{:type "text"
+              :text (json/generate-string
+                     (annotate/annotate (sec/title-index) text))}]})
 
 (defn do-notes-reindex
   "Re-index a single file or trigger full mtime-based catch-up scan."
@@ -584,7 +709,11 @@
       (let [node-id (or id (when title (resolve-node-id title)))
             edit-mode (or mode "append")]
         (if-not node-id
-          {:content [{:type "text" :text "Node not found"}] :isError true}
+          {:content [{:type "text"
+                      :text (if (and (nil? id) (nil? title))
+                              "Provide id or title"
+                              (str "Node not found: " (or id title)))}]
+           :isError true}
           (let [item (idx/get-item @hnsw-index node-id)
                 node-level (if item (.-level ^org_roam_mcp.index.NoteItem item) 1)
                 adjusted (adjust-heading-levels content node-level)
@@ -634,6 +763,16 @@
 ;; MCP JSON-RPC handler
 ;; ---------------------------------------------------------------------------
 
+(def ^:private tool-handlers
+  {"notes-search"         do-notes-search
+   "notes-backlinks"      do-notes-backlinks
+   "notes-read"           do-notes-read
+   "notes-search-related" do-notes-search-related
+   "notes-annotate"       do-notes-annotate
+   "notes-reindex"        do-notes-reindex
+   "notes-create"         do-notes-create
+   "notes-edit"           do-notes-edit})
+
 (def ^:private server-info {:name "org-roam-mcp" :version "0.1.0"})
 
 (defn- handle-request
@@ -653,23 +792,25 @@
      :result {:tools tools}}
 
     "tools/call"
-    (let [{tool "name" args "arguments"} params]
+    (let [{tool-name "name" args "arguments"} params
+          tool    (first (filter #(= (:name %) tool-name) tools))
+          handler (get tool-handlers tool-name)]
       {:jsonrpc "2.0" :id id
-       :result (try
-                 (case tool
-                   "notes-search"         (do-notes-search args)
-                   "notes-backlinks"      (do-notes-backlinks args)
-                   "notes-read"           (do-notes-read args)
-                   "notes-search-related" (do-notes-search-related args)
-                   "notes-reindex"        (do-notes-reindex args)
-                   "notes-create"         (do-notes-create args)
-                   "notes-edit"           (do-notes-edit args)
-                   {:content [{:type "text" :text (str "Unknown tool: " tool)}]
-                    :isError true})
-                 (catch Exception e
-                   (util/log "ERROR in tool" tool ":" (.getMessage e))
-                   {:content [{:type "text" :text (str "Error: " (.getMessage e))}]
-                    :isError true}))})
+       :result
+       (if-not handler
+         {:content [{:type "text"
+                     :text (str "Unknown tool: " tool-name
+                                ". Available: " (str/join ", " (map :name tools)))}]
+          :isError true}
+         (or (validate-args tool args)
+             (let [{:keys [args error]} (normalize-args tool-name args)]
+               (or error
+                   (try
+                     (handler args)
+                     (catch Exception e
+                       (util/log "ERROR in tool" tool-name ":" (.getMessage e))
+                       {:content [{:type "text" :text (str "Error: " (.getMessage e))}]
+                        :isError true}))))))})
 
     ;; Unknown method - ignore
     nil))

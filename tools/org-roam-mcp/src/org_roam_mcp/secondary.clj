@@ -64,6 +64,11 @@
   [tag]
   (get @tag-idx tag #{}))
 
+(defn title-index
+  "Snapshot of the title/alias index {lowercase-string -> [entry ...]}."
+  []
+  @title-idx)
+
 (defn update-for-item!
   "Incrementally add a single item's metadata to all secondary indices."
   [item]

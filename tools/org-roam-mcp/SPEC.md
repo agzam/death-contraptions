@@ -6,14 +6,17 @@ knowledge base to AI-agentic workflows.
 ## 1. Architecture Overview
 
 ```
-MBP (local)                                 Arch (arch-machina)
+MBP (local, M3 Max)
 +------------------------------------+      +---------------------+
 | ECA (stdio) <-> org-roam-mcp (JVM) |      |                     |
 |                                    | HTTP | ollama serve        |
-|  - hnsw index (in-memory + file)   |----->| nomic-embed-text    |
-|  - file watcher on ~/Sync/org/     |:11434| CUDA / RTX 3070     |
+|  - hnsw index (in-memory + file)   |----->| embeddinggemma      |
+|  - file watcher on ~/Sync/org/     |:11434| Metal (local)       |
 |  - emacsclient for note CRUD       |      |                     |
 +------------------------------------+      +---------------------+
+
+Ollama runs locally by default. A remote Ollama host is still supported
+via the :ssh-tunnel config (auto-established when the local port is dead).
 
 Storage (local):
   ~/Sync/org/                          .org files (source of truth, synced)
@@ -110,7 +113,12 @@ This applies to `:org-dir`, `:index-dir`, and any paths in tool arguments.
 ```clojure
 {;; Ollama embedding endpoint (default: http://localhost:11434)
  :ollama-url   "http://localhost:11434"
- :model        "nomic-embed-text"
+ :model        "embeddinggemma"
+
+ ;; Prefixes the embedding model was trained with. Asymmetric by design:
+ ;; documents and queries get different ones. Must match :model.
+ :doc-prefix   "title: none | text: "
+ :query-prefix "task: search result | query: "
 
  ;; SSH tunnel - auto-establish if Ollama is not reachable locally
  :ssh-tunnel
@@ -130,7 +138,7 @@ This applies to `:org-dir`, `:index-dir`, and any paths in tool arguments.
 
  ;; HNSW index parameters
  :hnsw
- {:dimensions       768          ;; nomic-embed-text output dims
+ {:dimensions       768          ;; embedding model output dims
   :max-items        100000       ;; capacity ceiling
   :m                16           ;; bi-directional links per node
   :ef               200          ;; search-time accuracy parameter
@@ -264,9 +272,10 @@ The text sent to Ollama for embedding is composed as:
 Title is prepended so that the embedding captures the topic even for
 short body sections. Tags provide categorical signal.
 
-Max chunk size: 8192 tokens (~6000 words). nomic-embed-text has an 8192
-token context window. Chunks exceeding this are truncated (should be rare
-for well-structured notes).
+Max chunk size tracks the embedding model's context window (embeddinggemma:
+2048 tokens, ~8000 chars). Chunks exceeding it are truncated, which is rare:
+in a 2188-chunk corpus the median chunk is ~130 chars and under 1% exceed
+8000.
 
 ## 6. Embedding Pipeline
 
@@ -380,7 +389,7 @@ A small `meta.edn` file alongside `index.hnsw`:
 {:version       1                        ;; schema version
  :created-at    "2026-04-08T..."
  :last-indexed  "2026-04-08T..."
- :model         "nomic-embed-text"       ;; embedding model used
+ :model         "embeddinggemma"         ;; embedding model used
  :dimensions    768
  :chunk-count   4523
  :file-mtimes   {"clojure.org" 1712345678
@@ -499,13 +508,15 @@ Semantic search with optional structural filters.
            :items {:type "string"}
            :description "Filter: only notes that link to ALL of these
                          nodes (by title, alias, or node ID)"}
+   :limit {:type "integer"
+           :description "Max results to return (default: 10)"}
    :k     {:type "integer"
-           :description "Max results to return (default: 10)"}}}}
+           :description "Deprecated alias for limit"}}}}
 ```
 
 Implementation strategy for compound queries:
-- If `:query` is provided: embed it, search HNSW for top `k * 10`
-  results (over-fetch), then apply tag/link filters, return top `k`.
+- If `:query` is provided: embed it, search HNSW for top `limit * 10`
+  results (over-fetch), then apply tag/link filters, return top `limit`.
 - If only filters (no `:query`): scan the tag-index and backlink-index
   directly, intersect results, return matching chunks with metadata.
 - Filters use AND logic: a result must match ALL specified tags AND
@@ -593,36 +604,39 @@ producing link annotations with disambiguation data.
 ```clojure
 {:name "notes-annotate"
  :description
- "Given text, identify words and phrases that match existing note
-  titles or aliases. Returns annotated spans with candidate links.
-  When multiple notes match the same text (ambiguity), all candidates
-  are returned with similarity scores for disambiguation.
-  Use this to turn plain text into richly linked org-mode content."
+ "Identify entities in text that match existing note titles/aliases.
+  Returns annotation spans with candidate node links, plus
+  annotated-text (top candidate applied) and safe-annotated-text
+  (only unambiguous matches applied).
+  Use to turn plain text into linked org-mode content."
  :inputSchema
  {:type "object"
   :properties
   {:text {:type "string"
-          :description "Plain text to annotate with note links"}
-   :context {:type "string"
-             :description "Optional surrounding context to help
-                           disambiguation (e.g., the rest of the
-                           document, or 'this is a work journal')"}}
+          :description "Plain text to scan for entities matching
+                        note titles/aliases"}}
   :required ["text"]}}
 ```
 
-Implementation:
+Implementation (see `annotate.clj`):
 
-1. Scan text against the title-index using longest-match-first
-   strategy. For each position in the text, try matching the longest
-   known title/alias first, then shorter ones. Avoid overlapping spans.
+1. Scan text against the title-index, case-insensitive, at word
+   boundaries (letter/digit lookarounds, so titles like C++ still
+   bound sanely). Longest-match-first at each position, left to
+   right, no overlapping spans. Titles/aliases shorter than 2 chars
+   are ignored.
 
 2. For each matched span, collect all candidate nodes from the
    title-index (there may be multiple for ambiguous names).
+   Candidates are deduplicated per node and ordered
+   deterministically: title matches before alias matches, then
+   alphabetical. No similarity scoring - the calling agent (or a
+   future UI) disambiguates; embedding-based context ranking is a
+   possible future extension (see TODO).
 
-3. If ambiguous AND `:context` is provided: embed the context and
-   compute similarity against each candidate's embedding to rank them.
-
-4. Return structured annotation data.
+3. Return structured annotation data plus two rendered variants.
+   Rendering keeps the matched surface text as the link description,
+   so the prose reads unchanged.
 
 Response format:
 
@@ -633,34 +647,30 @@ Response format:
    :matched-text "Dan"
    :ambiguous true
    :candidates
-   [{:node-id "A1B2..."
-     :title "Dan Smith"
-     :score 0.95        ;; context-based disambiguation score (if context provided)
-     :link "[[id:A1B2...][Dan Smith]]"}
-    {:node-id "C3D4..."
+   [{:node-id "C3D4..."
      :title "Dan Jones"
-     :score 0.72
-     :link "[[id:C3D4...][Dan Jones]]"}]}
-  {:span [30 32]
+     :link "[[id:C3D4...][Dan Jones]]"}
+    {:node-id "A1B2..."
+     :title "Dan Smith"
+     :link "[[id:A1B2...][Dan Smith]]"}]}
+  {:span [29 31]
    :matched-text "DB"
    :ambiguous false
    :candidates
    [{:node-id "E5F6..."
      :title "Database"
-     :score 1.0
      :link "[[id:E5F6...][Database]]"}]}
-  {:span [44 48]
+  {:span [43 47]
    :matched-text "ACID"
    :ambiguous false
    :candidates
    [{:node-id "G7H8..."
      :title "ACID properties"
-     :score 1.0
      :link "[[id:G7H8...][ACID properties]]"}]}]
 
  ;; Pre-rendered version with top candidates applied (for quick use)
  :annotated-text
- "[[id:A1B2...][Dan Smith]] proposed normalizing the [[id:E5F6...][DB]] for proper [[id:G7H8...][ACID]] rules"
+ "[[id:C3D4...][Dan]] proposed normalizing the [[id:E5F6...][DB]] for proper [[id:G7H8...][ACID]] rules"
 
  ;; Same but only unambiguous links applied, ambiguous left as plain text
  :safe-annotated-text
@@ -669,13 +679,16 @@ Response format:
 
 The response provides three layers for the consumer:
 - `:annotations` - full structured data for UI-driven disambiguation
-- `:annotated-text` - best-guess version (top candidate for each span)
+- `:annotated-text` - best-guess version (deterministic top candidate
+  for each span)
 - `:safe-annotated-text` - conservative version (only unambiguous links)
 
-An Emacs UI (future) could walk through `:annotations` where
-`:ambiguous` is true, presenting candidates via completing-read.
-The AI agent can use `:annotated-text` directly or reason about
-the ambiguous candidates using conversation context.
+The `:link` inside candidates uses the candidate's canonical title as
+description (a paste-ready link); the rendered texts keep the matched
+surface form instead. An Emacs UI (future) could walk through
+`:annotations` where `:ambiguous` is true, presenting candidates via
+completing-read. The AI agent can use `:annotated-text` directly or
+reason about the ambiguous candidates using conversation context.
 
 #### notes-create
 
@@ -693,59 +706,46 @@ Create a new note or insert content at a specific location.
  :inputSchema
  {:type "object"
   :properties
-  {:mode    {:type "string"
-             :enum ["file" "heading" "journal"]
-             :description "Creation mode (default: file)"}
-   :title   {:type "string"
-             :description "Note/heading title (required for file and heading modes)"}
+  {:title   {:type "string"
+             :description "Heading title for the new entry"}
    :content {:type "string"
-             :description "Body content to insert"}
-   :tags    {:type "array"
-             :items {:type "string"}
-             :description "Tags as note titles to link (file mode only)"}
+             :description "Body content (org-mode formatted)"}
+   :mode    {:type "string"
+             :enum ["journal" "heading" "file"]
+             :description "Creation mode (default: journal)"}
+
+   ;; journal mode params
+   :type   {:type "string"
+            :enum ["work" "personal"]
+            :description "Journal type (journal mode only, default: work)"}
+   :date   {:type "string"
+            :description "YYYY-MM-DD (journal mode only, default: today)"}
 
    ;; heading mode params
    :parent-id {:type "string"
-               :description "Node ID under which to insert the heading
-                             (heading mode only)"}
-   :level     {:type "integer"
-               :description "Heading level, e.g., 2 for '** heading'
-                             (heading mode, default: one below parent)"}
-
-   ;; journal mode params
-   :date   {:type "string"
-            :description "YYYY-MM-DD (journal mode, default: today)"}
-   :journal-type {:type "string"
-                  :enum ["work" "personal"]
-                  :description "Journal type (journal mode, default: work)"}
-   :heading {:type "string"
-             :description "Sub-heading under the day entry
-                           (journal mode, optional)"}}
-  :required ["content"]}}
+               :description "Node ID to insert under (heading mode only)"}}
+  :required ["title" "content"]}}
 ```
 
 Implementation details per mode:
 
 file mode:
-- emacsclient creates a new file via org-roam capture template
+- Creates a new standalone .org file (slugified title) in the org dir
 - Sets #+title, generates :ID:, inserts content
-- If :tags provided, inserts tag-links after title line
 - File watcher picks up the new file for indexing
 
 heading mode:
-- emacsclient navigates to :parent-id node
-- Inserts a new heading at the specified :level
+- emacsclient navigates to :parent-id node (requires parent-id)
+- Appends a new child heading at the end of the parent's subtree,
+  one level below the parent; content headings are shifted to nest
 - Generates a new :ID: property for the heading
-- Inserts :content under the heading
 - Saves the buffer
 
 journal mode:
-- emacsclient calls vulpea-journal+ with the date and type
-- If the day entry (level-1 heading) does not exist, it is created
-- If :heading is provided, inserts a level-2 sub-heading under the day
-- Appends :content at the insertion point
-- Insertion point: end of the day's subtree (before next day heading),
-  so new entries appear chronologically at the bottom
+- emacsclient resolves the vulpea journal note for the date and type
+- Inserts a level-2 heading titled :title under the day entry
+- Appends :content at the end of the day's subtree, so new entries
+  appear chronologically at the bottom
 
 Response for all modes:
 
@@ -755,6 +755,34 @@ Response for all modes:
  :title   "..."
  :mode    "journal"}
 ```
+
+#### notes-edit
+
+Edit an existing note's body via emacsclient.
+
+```clojure
+{:name "notes-edit"
+ :description
+ "Edit a note by ID or title. Modes: append (default) or replace body."
+ :inputSchema
+ {:type "object"
+  :properties
+  {:id      {:type "string"
+             :description "Node ID to edit"}
+   :title   {:type "string"
+             :description "Node title (alternative to id)"}
+   :content {:type "string"
+             :description "New content (org-mode formatted)"}
+   :mode    {:type "string"
+             :enum ["append" "replace"]
+             :description "Edit mode (default: append)"}}
+  :required ["content"]}}
+```
+
+Implementation: resolves the node via org-id-find, then either appends
+:content at the end of the node's subtree or replaces the body between
+the heading's meta data and the subtree end. Content headings are
+shifted to nest under the node's level. Returns `{:node-id :file :mode}`.
 
 #### notes-search-related
 
@@ -769,10 +797,12 @@ Find notes semantically related to an existing note.
  :inputSchema
  {:type "object"
   :properties
-  {:node {:type "string"
-          :description "Node title, alias, or UUID"}
-   :k    {:type "integer"
-          :description "Max results (default: 10)"}}
+  {:node  {:type "string"
+           :description "Node title, alias, or UUID"}
+   :limit {:type "integer"
+           :description "Max results (default: 10)"}
+   :k     {:type "integer"
+           :description "Deprecated alias for limit"}}
   :required ["node"]}}
 ```
 
@@ -960,13 +990,14 @@ blocking startup on re-indexing.
 
 | Scenario | Behavior |
 |----------|----------|
+| Invalid tool arguments | Rejected before dispatch with an error naming the problem (unknown args, missing/null required args, type/enum mismatches) plus the accepted argument list. Schemas declare `additionalProperties: false`. Deprecated aliases (`k` for `limit`) are rewritten; passing both spellings is an error. |
 | Ollama unreachable on startup | Log warning, start anyway with existing index. Queries work, indexing queued until Ollama available. |
 | Ollama unreachable during re-index | Skip file, retry on next watcher cycle |
 | Malformed .org file | Log warning with file path, skip file |
 | Index file corrupted/missing | `load-index` catches deserialization errors, logs a warning, deletes the corrupt file, and returns nil - triggering a full rebuild from .org files |
 | emacsclient not running | Return MCP error: "Emacs server not running" |
 | File deleted | Remove all chunks for that file from index |
-| Chunk too large (> 8192 tokens) | Progressive truncation: batch fails -> individual embed -> truncate to 60% and retry (up to 4 attempts) |
+| Chunk exceeds model context window | Progressive truncation: batch fails -> individual embed -> truncate to 60% and retry (up to 4 attempts) |
 
 ## 13. Performance Considerations
 
