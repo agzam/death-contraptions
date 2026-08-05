@@ -3,6 +3,7 @@
 - Never use bold (**text**) or italic (*text*) emphasis.
 - Avoid em-dash, prefer hyphens.
 - Do not apologize, do not tell me I right - only say if I'm wrong.
+- Never hard-wrap prose. Every renderer soft-wraps markdown and org, so manual line breaks at some column width only corrupt the rendered output. A paragraph is one single line, however long. Break lines only where the syntax demands it - separate list items, headings, table rows, code blocks, blank line between paragraphs.
 
 # Context Completeness
 
