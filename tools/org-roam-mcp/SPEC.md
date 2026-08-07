@@ -20,7 +20,7 @@ via the :ssh-tunnel config (auto-established when the local port is dead).
 
 Storage (local):
   ~/Sync/org/                          .org files (source of truth, synced)
-  ~/.emacs.d/.local/cache/org-roam-mcp/
+  ~/.emacs.d/.local/.cache/org-roam-mcp/
     index.hnsw                         serialized hnsw index (~50-150 MB)
     meta.edn                           index metadata (version, timestamp)
 ```
@@ -134,7 +134,7 @@ This applies to `:org-dir`, `:index-dir`, and any paths in tool arguments.
  :exclude      ["data/" ".sync/" ".git/"]
 
  ;; Persisted index location
- :index-dir    "~/.emacs.d/.local/cache/org-roam-mcp"
+ :index-dir    "~/.emacs.d/.local/.cache/org-roam-mcp"
 
  ;; HNSW index parameters
  :hnsw
