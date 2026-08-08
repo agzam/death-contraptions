@@ -23,7 +23,7 @@ All discovery here is read-only. The `jira` CLI is go-jira with keyring auth: `j
 Run the shared helper with `--retro`:
 
 ```
-bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] --retro [--sprint active|last|<id>] > /tmp/sprint-retro.edn
+bb ~/.config/eca/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] --retro [--sprint active|last|<id>] > /tmp/sprint-retro.edn
 ```
 
 It makes several Jira and Greenhopper calls, so run it once and read from the saved file - do not re-run it to re-slice. It resolves the board (reusing the cached static facts), selects the sprint, pulls Jira's sprint report plus a by-key fetch with changelog and comments, and returns one EDN map:

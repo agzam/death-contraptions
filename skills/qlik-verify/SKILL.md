@@ -14,7 +14,7 @@ Two environment kinds (from config `:kind`):
 ## Prerequisites
 
 - nrepl MCP enabled (it is the channel browser-repl is driven through): `:servers {:nrepl {}}` in `local-config.edn.gpg`, then `bb setup.bb`, then reload the MCP.
-- browser-repl deps installed once: `(cd /Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl && npm install)`.
+- browser-repl deps installed once: `(cd ~/.config/eca/death-contraptions/tools/browser-repl && npm install)`.
 - A dedicated browser profile logged into the target tenant once. Drive it with browser-repl `:persistent` mode (`--user-data-dir <profile>`) so the login persists across runs, or `:attach` mode (`--cdp-endpoint`) against a debug-port browser. Do NOT `:attach` to your everyday browser if losing focus/tabs would disrupt you.
 - For SDE backend watch: download the SDE kubeconfig from devops-console and record its context in the env's `:kube-context`.
 
@@ -23,7 +23,7 @@ Two environment kinds (from config `:kind`):
 Config lives encrypted under `:qlik-verify` in `local-config.edn.gpg`. Pull ONLY the non-secret fields for the chosen env, so credentials and API tokens never enter the chat context (`-- <env>` selects it; omit to use `:default-env`):
 
 ```sh
-gpg --quiet --decrypt /Users/ryl/GitHub/agzam/death-contraptions/local-config.edn.gpg \
+gpg --quiet --decrypt ~/.config/eca/death-contraptions/local-config.edn.gpg \
  | bb -e '(let [m (clojure.edn/read-string (slurp *in*))
                 e (or (first *command-line-args*) (get-in m [:qlik-verify :default-env]))]
             (prn {:env e
@@ -41,7 +41,7 @@ Also read `:defaults` (`:monitor`, `:report`, `:safety`) the same way; they tune
 Start a browser-repl session, then navigate. Launch (a background job; note the printed port):
 
 ```sh
-bb /Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/launch.bb \
+bb ~/.config/eca/death-contraptions/tools/browser-repl/launch.bb \
    --mode persistent --user-data-dir ~/.cache/qlik-verify/chrome-profile
 ```
 
@@ -69,7 +69,7 @@ Start monitors BEFORE triggering the UI action, so events are caught live. Use t
 SDE (k8s available) - if the env's `:kube-context` is unset (`FILL_ME`), do not pass `--context`; point stern at the kubeconfig and let it use the current-context (`~/.kube/<sde>` has exactly one). Watch the stitch services for real errors:
 
 ```sh
-/Users/ryl/GitHub/agzam/death-contraptions/tools/monitor/monitor.bb \
+~/.config/eca/death-contraptions/tools/monitor/monitor.bb \
   --source "stern --kubeconfig ~/.kube/<sde> -n default --color never -o default --since 3s '(stitch-connections|stitch-menagerie|stitch-orchestrator|stitch-bobbin|target-qlik|stitch-agent)'" \
   --regex '(?i)("level"\s*:\s*"(error|fatal)"|\blevel=(error|fatal)\b|\bpanic:|stacktrace)' --live --max-runtime 900
 ```
@@ -82,7 +82,7 @@ Filter notes (learned the hard way):
 Pod LIFECYCLE (a sync spawns `<connId>-...-sync` and, when loading, `target-qlik`/`stitch-orchestrator` pods - none are standing deployments). Name-filter rather than the ~180-pod firehose of `k8s-resources-watch`:
 
 ```sh
-/Users/ryl/GitHub/agzam/death-contraptions/tools/monitor/monitor.bb \
+~/.config/eca/death-contraptions/tools/monitor/monitor.bb \
   --source 'kubectl --kubeconfig ~/.kube/<sde> -n default get pods -w -o json' \
   --jq 'select((.metadata.name // "") | test("stitch|target-qlik|-sync")) | {pod: .metadata.name, phase: .status.phase}' \
   --live --max-runtime 900

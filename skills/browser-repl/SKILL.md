@@ -12,8 +12,8 @@ what you need instead of dumping huge snapshots.
 
     agent -> nrepl MCP (auto-awaits cljs) -> nbb nREPL (holds browser + atoms) -> Playwright -> chromium
 
-Stdlib: `/Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/browser_repl.cljs`
-Launcher: `/Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/launch.bb`
+Stdlib: `~/.config/eca/death-contraptions/tools/browser-repl/browser_repl.cljs`
+Launcher: `~/.config/eca/death-contraptions/tools/browser-repl/launch.bb`
 
 ## When to use which browser tool
 
@@ -26,7 +26,7 @@ Launcher: `/Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/launch.
 
 ## Prerequisites
 
-- Deps installed once: `(cd /Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl && npm install)`
+- Deps installed once: `(cd ~/.config/eca/death-contraptions/tools/browser-repl && npm install)`
   (pins nbb + playwright; postinstall fetches chromium - reused from the shared
   ms-playwright cache).
 - nrepl MCP enabled: `:servers {:nrepl {:disabled? false}}` in
@@ -39,7 +39,7 @@ stdlib, applies the mode, launches the browser, writes `.nrepl-port`, and prints
 the port. Keep it running; killing it tears the whole tree down.
 
 ```sh
-bb /Users/ryl/GitHub/agzam/death-contraptions/tools/browser-repl/launch.bb --mode fresh
+bb ~/.config/eca/death-contraptions/tools/browser-repl/launch.bb --mode fresh
 ```
 
 Modes (`--mode`):

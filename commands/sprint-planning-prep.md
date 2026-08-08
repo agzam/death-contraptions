@@ -21,7 +21,7 @@ Keep the response to the rundown itself. Do not narrate tool calls, do not fetch
 Run the shared helper with `--plan`:
 
 ```
-bb /Users/ryl/GitHub/agzam/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] --plan
+bb ~/.config/eca/death-contraptions/scripts/jira-board/jira-board.bb [<board-id>] --plan
 ```
 
 It resolves the board (reusing the static facts - name, story-points field, columns - cached under `~/.cache/jira-board/`, the same cache the sibling commands fill, so repeat runs skip the board lookup), then returns the active sprint's unfinished tickets followed by the whole backlog, each projected. One EDN map:

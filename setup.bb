@@ -412,6 +412,12 @@ end tell"
     (create-symlink (str eca-dir "/tools") tools-dir)
     (println (str "  symlink: ~/.config/eca/tools -> " tools-dir))
 
+    ;; Repo-root anchor: skills/commands are copied (not symlinked) to
+    ;; per-client dirs, so they need a machine-independent path back to
+    ;; the repo for tools/, scripts/, and local-config.edn.gpg.
+    (create-symlink (str eca-dir "/death-contraptions") repo-dir)
+    (println (str "  symlink: ~/.config/eca/death-contraptions -> " repo-dir))
+
     (copy-tree skills-dir (str eca-dir "/skills"))
     (println (str "  copied: ~/.config/eca/skills"))
 

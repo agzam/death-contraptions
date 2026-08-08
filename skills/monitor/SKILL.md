@@ -17,7 +17,7 @@ Do not use for one-shot queries. If the user wants a single snapshot, call the r
 
 ## Tool
 
-`tools/monitor/monitor.bb` in this repo. Invoke via its absolute path. No MCP registration - it is a plain Babashka script driven by ECA background jobs.
+`~/.config/eca/death-contraptions/tools/monitor/monitor.bb` - a setup.bb-managed symlink that resolves to the repo on every machine. No MCP registration - it is a plain Babashka script driven by ECA background jobs.
 
 Flags:
 
@@ -55,7 +55,7 @@ Pick a short descriptive label for `background=` so multiple monitors are distin
 
 ```
 eca__shell_command
-  command    = /<abs repo path>/tools/monitor/monitor.bb --source '<cmd>' --jq '<expr>' --live --max-runtime 600
+  command    = ~/.config/eca/death-contraptions/tools/monitor/monitor.bb --source '<cmd>' --jq '<expr>' --live --max-runtime 600
   background = <label like k8s-warnings-prod>
 ```
 

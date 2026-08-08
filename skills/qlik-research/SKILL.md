@@ -58,7 +58,7 @@ On any failure:
 
 - Surface the exact error text to the user with the likely fix.
 - Fall back to `web_search` against public Qlik docs (`qlik.dev`, `help.qlik.com`) only for the cases those cover, and state explicitly that the answer is from public sources, not the internal KB.
-- If the binary itself is stale after a recent upstream release, suggest `bb tools/qlik-kb/update.bb`.
+- If the binary itself is stale after a recent upstream release, suggest `bb ~/.config/eca/death-contraptions/tools/qlik-kb/update.bb`.
 
 ## Step 6: Summarize
 
